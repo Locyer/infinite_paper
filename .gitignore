@@ -11,4 +11,4 @@
 /release/
 /releases/
 /build_release_*.log
-/tool/build_release.ps1
+/tool/build_release*.ps1
