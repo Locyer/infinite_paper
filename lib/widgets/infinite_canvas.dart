@@ -21,6 +21,7 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
   double _lastScale = 1;
   int? _panPointer;
   Offset? _lastPan;
+  Offset? _eraserCursor;
   CanvasController get c => widget.controller;
   Offset world(Offset p) => c.document.viewport.screenToWorld(p);
   bool _isStylus(PointerEvent e) =>
@@ -48,6 +49,9 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
       return;
     }
     final p = world(e.localPosition);
+    if ({CanvasTool.eraserStroke, CanvasTool.eraserPartial}.contains(c.tool)) {
+      setState(() => _eraserCursor = e.localPosition);
+    }
     switch (c.tool) {
       case CanvasTool.pen || CanvasTool.highlighter || CanvasTool.laser:
         c.beginStroke(p, pressure: e.pressure);
@@ -73,6 +77,9 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
       return;
     }
     final p = world(e.localPosition);
+    if ({CanvasTool.eraserStroke, CanvasTool.eraserPartial}.contains(c.tool)) {
+      setState(() => _eraserCursor = e.localPosition);
+    }
     switch (c.tool) {
       case CanvasTool.pen || CanvasTool.highlighter || CanvasTool.laser:
         c.appendPoint(p, pressure: e.pressure);
@@ -107,6 +114,7 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
       }
     }
     if (_pointers.isEmpty) _transforming = false;
+    if (_pointers.isEmpty) setState(() => _eraserCursor = null);
   }
 
   @override
@@ -153,6 +161,7 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
         _pointers.remove(e.pointer);
         c.cancelActiveStroke();
         if (_pointers.isEmpty) _transforming = false;
+        if (_pointers.isEmpty) setState(() => _eraserCursor = null);
       },
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -191,6 +200,14 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
                           stroke: c.activeStroke,
                           lasso: c.lassoPoints,
                           viewport: c.document.viewport)))),
+          if (_eraserCursor != null)
+            Positioned(
+              left: _eraserCursor!.dx - _eraserDiameter / 2,
+              top: _eraserCursor!.dy - _eraserDiameter / 2,
+              child: IgnorePointer(child: Container(width: _eraserDiameter, height: _eraserDiameter,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: .08), border: Border.all(color: Theme.of(context).colorScheme.primary, width: 1.5))),
+              ),
+            ),
           Positioned(
               bottom: 12,
               right: 12,
@@ -217,6 +234,8 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
       ),
     );
   }
+
+  double get _eraserDiameter => (c.tool == CanvasTool.eraserPartial ? c.partialEraserWidth : c.strokeEraserWidth) * c.document.viewport.scale;
 
   @override
   void dispose() {

@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleDevelopmentRegion</key><string>$(DEVELOPMENT_LANGUAGE)</string>
-  <key>CFBundleDisplayName</key><string>无限草稿纸</string>
+  <key>CFBundleDisplayName</key><string>Infinite Paper</string>
   <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
   <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleName</key><string>infinite_paper</string>
+  <key>CFBundleName</key><string>Infinite Paper</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$(FLUTTER_BUILD_NAME)</string>
   <key>CFBundleVersion</key><string>$(FLUTTER_BUILD_NUMBER)</string>

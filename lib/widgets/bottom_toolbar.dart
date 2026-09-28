@@ -31,12 +31,6 @@ class BottomToolbar extends StatelessWidget {
                 _tool(Icons.gesture_outlined, '套索', CanvasTool.lasso),
                 _tool(Icons.pan_tool_alt_outlined, '移动', CanvasTool.pan),
                 IconButton(
-                    tooltip: '颜色',
-                    onPressed: () => onConfigure(controller.tool),
-                    icon: CircleAvatar(
-                        radius: 11,
-                        backgroundColor: Color(controller.colorValue))),
-                IconButton(
                     tooltip: '撤销',
                     onPressed: controller.canUndo ? controller.undo : null,
                     icon: const Icon(Icons.undo)),

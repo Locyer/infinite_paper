@@ -191,19 +191,20 @@ CanvasTool _toolFromName(String? name) => switch (name) {
     };
 
 class CanvasImage {
-  const CanvasImage({required this.id, required this.path, required this.rect});
+  const CanvasImage({required this.id, required this.path, required this.rect, this.rotation = 0});
   final String id;
   final String path;
   final Rect rect;
-  CanvasImage copyWith({String? id, String? path, Rect? rect}) => CanvasImage(
-      id: id ?? this.id, path: path ?? this.path, rect: rect ?? this.rect);
+  final double rotation;
+  CanvasImage copyWith({String? id, String? path, Rect? rect, double? rotation}) => CanvasImage(
+      id: id ?? this.id, path: path ?? this.path, rect: rect ?? this.rect, rotation: rotation ?? this.rotation);
   Map<String, dynamic> toJson() => {
         'id': id,
         'path': path,
         'x': rect.left,
         'y': rect.top,
         'width': rect.width,
-        'height': rect.height
+        'height': rect.height, 'rotation': rotation
       };
   factory CanvasImage.fromJson(Map<String, dynamic> j) => CanvasImage(
       id: j['id'] as String,
@@ -212,7 +213,7 @@ class CanvasImage {
           (j['x'] as num).toDouble(),
           (j['y'] as num).toDouble(),
           (j['width'] as num).toDouble(),
-          (j['height'] as num).toDouble()));
+          (j['height'] as num).toDouble()), rotation: (j['rotation'] as num? ?? 0).toDouble());
 }
 
 class CanvasText {
@@ -221,24 +222,25 @@ class CanvasText {
       required this.text,
       required this.rect,
       required this.colorValue,
-      required this.fontSize});
+      required this.fontSize, this.rotation = 0});
   final String id;
   final String text;
   final Rect rect;
   final int colorValue;
   final double fontSize;
+  final double rotation;
   CanvasText copyWith(
           {String? id,
           String? text,
           Rect? rect,
           int? colorValue,
-          double? fontSize}) =>
+          double? fontSize, double? rotation}) =>
       CanvasText(
           id: id ?? this.id,
           text: text ?? this.text,
           rect: rect ?? this.rect,
           colorValue: colorValue ?? this.colorValue,
-          fontSize: fontSize ?? this.fontSize);
+          fontSize: fontSize ?? this.fontSize, rotation: rotation ?? this.rotation);
   Map<String, dynamic> toJson() => {
         'id': id,
         'text': text,
@@ -247,7 +249,7 @@ class CanvasText {
         'width': rect.width,
         'height': rect.height,
         'color': colorValue,
-        'fontSize': fontSize
+        'fontSize': fontSize, 'rotation': rotation
       };
   factory CanvasText.fromJson(Map<String, dynamic> j) => CanvasText(
       id: j['id'] as String,
@@ -258,7 +260,7 @@ class CanvasText {
           (j['width'] as num).toDouble(),
           (j['height'] as num).toDouble()),
       colorValue: (j['color'] as num? ?? 0xff111827).toInt(),
-      fontSize: (j['fontSize'] as num? ?? 18).toDouble());
+      fontSize: (j['fontSize'] as num? ?? 18).toDouble(), rotation: (j['rotation'] as num? ?? 0).toDouble());
 }
 
 class DocumentSummary {

@@ -45,4 +45,12 @@ void main() {
     expect(stroke.hitTest(const Offset(5, 3), 2), isTrue);
     expect(stroke.hitTest(const Offset(5, 10), 2), isFalse);
   });
+
+  test('legacy canvas objects default to zero rotation', () {
+    final image = CanvasImage.fromJson(
+        {'id': 'i', 'path': 'x', 'x': 0, 'y': 0, 'width': 10, 'height': 10});
+    final text = CanvasText.fromJson({'id': 't', 'text': 'x', 'x': 0, 'y': 0, 'width': 10, 'height': 10});
+    expect(image.rotation, 0);
+    expect(text.rotation, 0);
+  });
 }

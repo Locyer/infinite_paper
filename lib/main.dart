@@ -21,7 +21,7 @@ class InfinitePaperApp extends StatelessWidget {
         create: (_) => CanvasController(repository: repository)..open(),
         child: Consumer<CanvasController>(
           builder: (context, controller, _) => MaterialApp(
-            title: '无限草稿纸',
+            title: 'Infinite Paper',
             debugShowCheckedModeBanner: false,
             themeMode: switch (controller.themeMode) {
               AppThemeMode.system => ThemeMode.system,

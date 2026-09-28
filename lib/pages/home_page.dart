@@ -8,6 +8,7 @@ import '../models/canvas_models.dart';
 import '../services/export_service.dart';
 import '../widgets/bottom_toolbar.dart';
 import '../widgets/infinite_canvas.dart';
+import '../widgets/hsv_color_picker.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -221,8 +222,10 @@ void _toolOptions(BuildContext context, CanvasController c, CanvasTool tool) {
                                               color: Colors.white)
                                           : null)))
                               .toList()),
-                      const SizedBox(height: 12),
-                      _ColorSliders(controller: c, refresh: refresh),
+                      if (!{CanvasTool.eraserStroke, CanvasTool.eraserPartial}.contains(tool)) ...[
+                        const SizedBox(height: 12),
+                        HsvColorPicker(colorValue: c.colorValue, onChanged: (value) { c.setColor(value); refresh(() {}); }),
+                      ],
                       _WidthSlider(controller: c, tool: tool, refresh: refresh),
                     ]),
               ))));
@@ -307,7 +310,10 @@ class _WidthSlider extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('大小：${value.toStringAsFixed(0)}'),
+        Row(children: [
+          Expanded(child: Text('大小：${value.toStringAsFixed(0)}')),
+          Container(width: value.clamp(8, 48), height: value.clamp(8, 48), decoration: BoxDecoration(shape: BoxShape.circle, color: {CanvasTool.eraserStroke, CanvasTool.eraserPartial}.contains(tool) ? Colors.transparent : Color(controller.colorValue), border: Border.all(color: Theme.of(context).colorScheme.onSurface))),
+        ]),
         Slider(
             min: 1,
             max: 100,
@@ -333,8 +339,7 @@ Future<void> _insertImage(BuildContext context, CanvasController c) async {
   final size = MediaQuery.sizeOf(context);
   await c.insertImage(
       File(selected.path),
-      c.document.viewport
-          .screenToWorld(Offset(size.width * .25, size.height * .35)));
+      c.document.viewport.screenToWorld(Offset(size.width / 2, size.height / 2)));
   if (context.mounted)
     ScaffoldMessenger.of(context)
         .showSnackBar(const SnackBar(content: Text('图片已插入画布')));
@@ -357,7 +362,7 @@ void _insertText(BuildContext context, CanvasController c) {
                       c.insertText(
                           input.text,
                           c.document.viewport.screenToWorld(
-                              Offset(size.width * .2, size.height * .3)));
+                              Offset(size.width / 2, size.height / 2)));
                       Navigator.pop(d);
                     },
                     child: const Text('插入'))
