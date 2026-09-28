@@ -1,0 +1,24 @@
+name: infinite_paper
+description: 仅本机使用的无限画布草稿纸。
+publish_to: none
+version: 1.1.0+2
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  provider: ^6.1.5
+  path_provider: ^2.1.5
+  image_gallery_saver_plus: ^5.1.1
+  image_picker: ^1.2.1
+  uuid: ^4.5.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

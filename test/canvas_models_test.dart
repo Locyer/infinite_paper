@@ -1,0 +1,48 @@
+import 'dart:ui';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_paper/models/canvas_models.dart';
+
+void main() {
+  test('viewport converts screen coordinates through scale and translation',
+      () {
+    const viewport = Viewport(scale: 2, offset: Offset(10, 20));
+    expect(viewport.screenToWorld(const Offset(30, 50)), const Offset(10, 15));
+  });
+
+  test('zoom clamps scale and keeps focal world point stable', () {
+    const viewport = Viewport();
+    final zoomed = viewport.zoomAround(const Offset(100, 80), 100);
+    expect(zoomed.scale, Viewport.maxScale);
+    expect(zoomed.screenToWorld(const Offset(100, 80)), const Offset(100, 80));
+  });
+
+  test('stroke json round trip keeps points and bounds', () {
+    final stroke = Stroke.pen(
+      id: 's',
+      colorValue: 0xff000000,
+      width: 4,
+      points: const [
+        StrokePoint(x: -2, y: 3, pressure: 1, time: 0),
+        StrokePoint(x: 8, y: 9, pressure: 1, time: 1),
+      ],
+    );
+    final restored = Stroke.fromJson(stroke.toJson());
+    expect(restored.bounds, const Rect.fromLTRB(-2, 3, 8, 9));
+    expect(restored.points, stroke.points);
+  });
+
+  test('stroke hit test finds a nearby segment but not a distant point', () {
+    final stroke = Stroke.pen(
+      id: 's',
+      colorValue: 0xff000000,
+      width: 2,
+      points: const [
+        StrokePoint(x: 0, y: 0, pressure: 1, time: 0),
+        StrokePoint(x: 10, y: 0, pressure: 1, time: 1),
+      ],
+    );
+    expect(stroke.hitTest(const Offset(5, 3), 2), isTrue);
+    expect(stroke.hitTest(const Offset(5, 10), 2), isFalse);
+  });
+}

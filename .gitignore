@@ -1,0 +1,13 @@
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+/.idea/
+*.iml
+/build/
+/android/.gradle/
+/ios/Pods/
+/release/
+/build_release_*.log
+/tool/build_release.ps1
