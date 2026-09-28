@@ -9,5 +9,6 @@
 /android/.gradle/
 /ios/Pods/
 /release/
+/releases/
 /build_release_*.log
 /tool/build_release.ps1

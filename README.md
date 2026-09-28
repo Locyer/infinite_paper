@@ -45,6 +45,10 @@ flutter build apk --release
 
 输出文件为 `build/app/outputs/flutter-apk/app-release.apk`。将它复制到 Android 手机安装即可；首次侧载时在系统设置中允许当前文件管理器安装未知来源应用。
 
+### 本地版本归档
+
+每次发布的 APK、SHA-256 与发布说明统一放在 `releases/v版本号/`，例如 `releases/v1.1.0/`。该目录不提交二进制到 Git；源码版本以 Git 标签（如 `v1.1.0`）为准。
+
 ## iPhone 免费签名侧载
 
 1. 在 macOS 安装 Flutter、Xcode 和 CocoaPods，执行上面的首次准备与 `flutter pub get`。
