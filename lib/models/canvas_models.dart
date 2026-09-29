@@ -13,7 +13,7 @@ enum CanvasTool {
   pan
 }
 
-enum CanvasBackground { blank, grid }
+enum CanvasBackground { blank, grid, warm }
 
 enum AppThemeMode { system, light, dark }
 

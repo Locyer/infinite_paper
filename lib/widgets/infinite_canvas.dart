@@ -260,6 +260,17 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
       case _TransformHandle.move || _TransformHandle.rotate:
         break;
     }
+    if ({_TransformHandle.topLeft, _TransformHandle.topRight,
+          _TransformHandle.bottomRight, _TransformHandle.bottomLeft}
+        .contains(handle)) {
+      final ratio = source.width / source.height;
+      final height = (right - left) / ratio;
+      if ({_TransformHandle.topLeft, _TransformHandle.topRight}.contains(handle)) {
+        top = bottom - height;
+      } else {
+        bottom = top + height;
+      }
+    }
     const minimum = 8.0;
     if (right - left < minimum) {
       if ({_TransformHandle.topLeft, _TransformHandle.bottomLeft, _TransformHandle.left}
@@ -403,7 +414,7 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
         position: RelativeRect.fromLTRB(localPosition.dx, localPosition.dy,
             size.width - localPosition.dx, size.height - localPosition.dy),
         items: const [
-          PopupMenuItem(value: 'paste', child: Text('粘贴')),
+          PopupMenuItem(value: 'paste', child: SizedBox(width: 54, child: Text('粘贴'))),
         ]);
     if (action == 'paste') c.pasteAt(world(localPosition));
   }
@@ -483,8 +494,8 @@ class _CanvasSelectionActions extends StatelessWidget {
     final theme = Theme.of(context);
     final isImage = controller.selection.any((id) => id.startsWith('i:'));
     final showBox = controller.hasTransformBox;
-    final bubbleTop = geometry.rect.top > 64
-        ? geometry.rect.top - 54
+    final bubbleTop = geometry.rect.top > 92
+        ? geometry.rect.top - 82
         : geometry.rect.bottom + 12;
     return Stack(children: [
       IgnorePointer(
@@ -511,6 +522,16 @@ class _CanvasSelectionActions extends StatelessWidget {
                               onPressed: controller.enableSelectionTransform,
                               icon: const Icon(Icons.open_in_full, size: 17),
                               label: const Text('调整大小')),
+                        PopupMenuButton<int>(
+                            tooltip: '修改选中颜色',
+                            onSelected: controller.colorSelection,
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(value: 0xff111827, child: Text('黑色')),
+                              PopupMenuItem(value: 0xffdc2626, child: Text('红色')),
+                              PopupMenuItem(value: 0xff2563eb, child: Text('蓝色')),
+                              PopupMenuItem(value: 0xff16a34a, child: Text('绿色')),
+                            ],
+                            icon: const Icon(Icons.palette_outlined, size: 19)),
                         if (isImage)
                           PopupMenuButton<String>(
                               tooltip: '裁剪',
@@ -618,7 +639,11 @@ class _CompletedPainter extends CustomPainter {
     canvas.drawRect(
         Offset.zero & size,
         Paint()
-          ..color = dark ? const Color(0xff171717) : const Color(0xfffcfcfc));
+          ..color = dark
+              ? const Color(0xff171717)
+              : document.background == CanvasBackground.warm
+                  ? const Color(0xfffffbeb)
+                  : const Color(0xfffcfcfc));
     final visible = Rect.fromLTRB(
         -viewport.offset.dx / viewport.scale,
         -viewport.offset.dy / viewport.scale,

@@ -34,6 +34,7 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   SelectionPresentation _selectionPresentation = SelectionPresentation.none;
   DocumentModel? _selectionMoveBefore;
   bool _selectionMoved = false;
+  double _transformRotationApplied = 0;
   CanvasTool _tool = CanvasTool.pen;
   AppThemeMode _themeMode = AppThemeMode.system;
   CanvasInputMode _inputMode = CanvasInputMode.penAndTouch;
@@ -585,7 +586,10 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  void beginTransform() => beginMoveSelection();
+  void beginTransform() {
+    _transformRotationApplied = 0;
+    beginMoveSelection();
+  }
 
   void endTransform() => endMoveSelection();
 
@@ -634,8 +638,13 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// 单个图片或文本按目标角度旋转，靠近直角时自动吸附。
   void setSelectionRotation(double radians) {
-    if (_selection.length != 1) return;
     final target = _snapAngle(radians);
+    if (_selection.length != 1) {
+      final delta = target - _transformRotationApplied;
+      _transformRotationApplied = target;
+      rotateSelection(delta);
+      return;
+    }
     _applySelectionChange((d) => d.copyWith(
         images: d.images
             .map((i) => _selection.contains('i:${i.id}')

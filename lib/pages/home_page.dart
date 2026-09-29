@@ -493,7 +493,9 @@ void _settings(BuildContext context, CanvasController c) {
                       DropdownMenuItem(
                           value: CanvasBackground.blank, child: Text('空白')),
                       DropdownMenuItem(
-                          value: CanvasBackground.grid, child: Text('网格'))
+                          value: CanvasBackground.grid, child: Text('网格')),
+                      DropdownMenuItem(
+                          value: CanvasBackground.warm, child: Text('奶白护眼'))
                     ])),
             ListTile(
                 leading:
