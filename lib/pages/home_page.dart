@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -9,8 +10,19 @@ import '../widgets/bottom_toolbar.dart';
 import '../widgets/infinite_canvas.dart';
 import '../widgets/hsv_color_picker.dart';
 
-class HomePage extends StatelessWidget {
+enum _ShelfSection { all, favorites, locked, trash }
+
+class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  _ShelfSection _section = _ShelfSection.all;
+  String _query = '';
+
   @override
   Widget build(BuildContext context) => Consumer<CanvasController>(
         builder: (context, c, _) {
@@ -24,10 +36,26 @@ class HomePage extends StatelessWidget {
             const Color(0xfffce7f3),
             const Color(0xffe9d5ff),
           ];
+          final displayed = c.summaries.where((s) {
+            final inSection = switch (_section) {
+              _ShelfSection.all => !s.isDeleted,
+              _ShelfSection.favorites => !s.isDeleted && s.isFavorite,
+              _ShelfSection.locked => !s.isDeleted && s.isLocked,
+              _ShelfSection.trash => s.isDeleted,
+            };
+            return inSection &&
+                s.title.toLowerCase().contains(_query.toLowerCase());
+          }).toList();
           return Scaffold(
               backgroundColor: Theme.of(context).brightness == Brightness.dark
                   ? const Color(0xff171717)
                   : const Color(0xfff4f3ef),
+              drawer: _ShelfDrawer(
+                  section: _section,
+                  onChanged: (section) {
+                    setState(() => _section = section);
+                    Navigator.pop(context);
+                  }),
               appBar: AppBar(
                   titleSpacing: 20,
                   title: const Column(
@@ -39,11 +67,19 @@ class HomePage extends StatelessWidget {
                       ]),
                   actions: [
                     IconButton(
-                        tooltip: '新建笔记',
+                        tooltip: '搜索笔记',
                         onPressed: () async {
-                          await c.createDocument();
-                          if (context.mounted) _openEditor(context);
+                          final result = await showSearch<String>(
+                              context: context,
+                              delegate: _NoteSearchDelegate(c.summaries));
+                          if (result != null && context.mounted) {
+                            setState(() => _query = result);
+                          }
                         },
+                        icon: const Icon(Icons.search)),
+                    IconButton(
+                        tooltip: '新建或导入',
+                        onPressed: () => _createMenu(context, c),
                         icon: const Icon(Icons.add_circle_outline))
                   ]),
               body: LayoutBuilder(builder: (context, constraints) {
@@ -59,34 +95,93 @@ class HomePage extends StatelessWidget {
                         childAspectRatio: .62,
                         crossAxisSpacing: 18,
                         mainAxisSpacing: 22),
-                    itemCount: c.summaries.length + 1,
+                    itemCount: displayed.length + (_section == _ShelfSection.all ? 1 : 0),
                     itemBuilder: (context, index) {
-                      if (index == 0) {
+                      if (_section == _ShelfSection.all && index == 0) {
                         return _ShelfNotebook(
                             isCreate: true,
                             color: Theme.of(context).colorScheme.primaryContainer,
                             title: '新建笔记',
                             subtitle: '开始一张无限草稿纸',
-                            onTap: () async {
-                              await c.createDocument();
-                              if (context.mounted) _openEditor(context);
-                            });
+                            onTap: () => _createMenu(context, c));
                       }
-                      final s = c.summaries[index - 1];
+                      final realIndex = index - (_section == _ShelfSection.all ? 1 : 0);
+                      final s = displayed[realIndex];
                       return _ShelfNotebook(
                           color: colors[(index - 1) % colors.length],
                           title: s.title,
                           subtitle: '更新于 ${_date(s.updatedAt)}',
                           onTap: () async {
                             if (await c.switchDocument(s.id) && context.mounted) {
+                              if (s.isDeleted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('请在“更多”中恢复笔记后再编辑')));
+                                return;
+                              }
                               _openEditor(context);
                             }
                           },
+                          coverPath: s.coverPath,
                           onMore: () => _documentMenu(context, c, s));
                     });
               }));
         },
       );
+}
+
+class _ShelfDrawer extends StatelessWidget {
+  const _ShelfDrawer({required this.section, required this.onChanged});
+  final _ShelfSection section;
+  final ValueChanged<_ShelfSection> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Drawer(
+        child: SafeArea(
+          child: Column(children: [
+            const ListTile(
+              leading: Icon(Icons.auto_stories_outlined),
+              title: Text('INFINITE PAPER', style: TextStyle(fontWeight: FontWeight.w800)),
+              subtitle: Text('YOUR NOTE SHELF'),
+            ),
+            const Divider(),
+            _item(Icons.notes_outlined, '全部笔记', _ShelfSection.all),
+            _item(Icons.star_border, '我的收藏', _ShelfSection.favorites),
+            _item(Icons.lock_outline, '已加锁笔记', _ShelfSection.locked),
+            _item(Icons.delete_outline, '最近删除', _ShelfSection.trash),
+          ]),
+        ),
+      );
+
+  Widget _item(IconData icon, String title, _ShelfSection value) => Builder(
+      builder: (context) => ListTile(
+          leading: Icon(icon),
+          selected: section == value,
+          title: Text(title),
+          onTap: () => onChanged(value)));
+}
+
+class _NoteSearchDelegate extends SearchDelegate<String> {
+  _NoteSearchDelegate(this.notes);
+  final List<DocumentSummary> notes;
+  @override
+  List<Widget>? buildActions(BuildContext context) => [
+        if (query.isNotEmpty)
+          IconButton(onPressed: () => query = '', icon: const Icon(Icons.clear))
+      ];
+  @override
+  Widget? buildLeading(BuildContext context) => IconButton(
+      onPressed: () => close(context, ''), icon: const Icon(Icons.arrow_back));
+  @override
+  Widget buildResults(BuildContext context) => _results(context);
+  @override
+  Widget buildSuggestions(BuildContext context) => _results(context);
+  Widget _results(BuildContext context) {
+    final result = notes.where((n) => !n.isDeleted &&
+        n.title.toLowerCase().contains(query.toLowerCase()));
+    return ListView(children: result.map((n) => ListTile(
+      leading: const Icon(Icons.menu_book_outlined), title: Text(n.title),
+      onTap: () => close(context, n.title))).toList());
+  }
 }
 
 Future<void> _documentMenu(
@@ -104,8 +199,26 @@ Future<void> _documentMenu(
                 title: const Text('复制'),
                 onTap: () => Navigator.pop(context, 'copy')),
             ListTile(
+                leading: Icon(summary.isFavorite ? Icons.star : Icons.star_border),
+                title: Text(summary.isFavorite ? '取消收藏' : '添加收藏'),
+                onTap: () => Navigator.pop(context, 'favorite')),
+            ListTile(
+                leading: Icon(summary.isLocked ? Icons.lock_open_outlined : Icons.lock_outline),
+                title: Text(summary.isLocked ? '取消加锁' : '加锁笔记'),
+                onTap: () => Navigator.pop(context, 'lock')),
+            ListTile(
+                leading: const Icon(Icons.image_outlined),
+                title: const Text('添加或更换封面'),
+                onTap: () => Navigator.pop(context, 'cover')),
+            if (summary.isDeleted)
+              ListTile(
+                  leading: const Icon(Icons.restore),
+                  title: const Text('恢复笔记'),
+                  onTap: () => Navigator.pop(context, 'restore')),
+            ListTile(
                 leading: const Icon(Icons.delete_outline, color: Colors.red),
-                title: const Text('删除', style: TextStyle(color: Colors.red)),
+                title: Text(summary.isDeleted ? '彻底删除' : '移到最近删除',
+                    style: const TextStyle(color: Colors.red)),
                 onTap: () => Navigator.pop(context, 'delete')),
           ])));
   if (action == null) return;
@@ -115,10 +228,100 @@ Future<void> _documentMenu(
     _rename(context, controller);
   } else if (action == 'copy') {
     await controller.duplicateDocument();
+  } else if (action == 'favorite') {
+    await controller.setFavorite(!summary.isFavorite);
+  } else if (action == 'lock') {
+    await controller.setLocked(!summary.isLocked);
+  } else if (action == 'cover') {
+    final selected = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (selected != null) await controller.setCover(File(selected.path));
+  } else if (action == 'restore') {
+    await controller.restoreCurrentDocument();
   } else if (action == 'delete' &&
-      await _confirm(context, '删除笔记', '删除后无法恢复。')) {
-    await controller.removeCurrentDocument();
+      await _confirm(context, summary.isDeleted ? '彻底删除笔记' : '移到最近删除',
+          summary.isDeleted ? '彻底删除后无法恢复。' : '可在“最近删除”中恢复。')) {
+    if (summary.isDeleted) {
+      await controller.removeCurrentDocument();
+    } else {
+      await controller.moveCurrentToTrash();
+    }
   }
+}
+
+Future<void> _createMenu(BuildContext context, CanvasController controller) async {
+  final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheet) => SafeArea(child: Wrap(children: [
+            ListTile(
+                leading: const Icon(Icons.note_add_outlined),
+                title: const Text('新建笔记'),
+                onTap: () => Navigator.pop(sheet, 'note')),
+            ListTile(
+                leading: const Icon(Icons.create_new_folder_outlined),
+                title: const Text('新建文件夹'),
+                onTap: () => Navigator.pop(sheet, 'folder')),
+            ListTile(
+                leading: const Icon(Icons.image_outlined),
+                title: const Text('导入图片'),
+                onTap: () => Navigator.pop(sheet, 'image')),
+            ListTile(
+                leading: const Icon(Icons.picture_as_pdf_outlined),
+                title: const Text('导入 PDF'),
+                onTap: () => Navigator.pop(sheet, 'pdf')),
+          ])));
+  if (action == null || !context.mounted) return;
+  if (action == 'note') {
+    await controller.createDocument();
+    if (context.mounted) _openEditor(context);
+  } else if (action == 'folder') {
+    final name = await _folderName(context);
+    if (name != null && context.mounted) {
+      // 命名文件夹会作为书架入口保存，便于后续手动整理同类草稿。
+      await controller.createDocument(title: '📁 $name');
+      if (context.mounted) _openEditor(context);
+    }
+  } else if (action == 'image') {
+    final image = await ImagePicker()
+        .pickImage(source: ImageSource.gallery, imageQuality: 92);
+    if (image == null) return;
+    await controller.createDocument(
+        title: '图片 ${DateTime.now().toString().substring(0, 16)}');
+    await controller.insertImage(File(image.path), const Offset(-120, -90));
+    if (context.mounted) _openEditor(context);
+  } else if (action == 'pdf') {
+    final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom, allowedExtensions: const ['pdf']);
+    final file = picked?.files.singleOrNull;
+    if (file == null) return;
+    await controller.createDocument(title: file.name.replaceFirst(
+        RegExp(r'\.pdf$', caseSensitive: false), ''));
+    controller.insertText(
+        'PDF 附件\n${file.name}\n${file.path ?? '已选择本机文件'}',
+        const Offset(-120, -60));
+    if (context.mounted) _openEditor(context);
+  }
+}
+
+Future<String?> _folderName(BuildContext context) async {
+  final input = TextEditingController();
+  final result = await showDialog<String>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+              title: const Text('新建文件夹'),
+              content: TextField(
+                  controller: input,
+                  autofocus: true,
+                  decoration: const InputDecoration(hintText: '文件夹名称')),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(dialog),
+                    child: const Text('取消')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(dialog, input.text.trim()),
+                    child: const Text('创建'))
+              ]));
+  input.dispose();
+  return result?.isEmpty ?? true ? null : result;
 }
 
 class _ShelfNotebook extends StatelessWidget {
@@ -128,11 +331,13 @@ class _ShelfNotebook extends StatelessWidget {
       required this.subtitle,
       required this.onTap,
       this.isCreate = false,
+      this.coverPath,
       this.onMore});
   final Color color;
   final String title, subtitle;
   final VoidCallback onTap;
   final bool isCreate;
+  final String? coverPath;
   final VoidCallback? onMore;
 
   @override
@@ -155,6 +360,12 @@ class _ShelfNotebook extends StatelessWidget {
                 child: Stack(children: [
                   Positioned.fill(
                       child: CustomPaint(painter: _PaperLinesPainter())),
+                  if (coverPath != null)
+                    Positioned.fill(
+                        child: ClipRRect(
+                            borderRadius: BorderRadius.circular(11),
+                            child: Image.file(File(coverPath!), fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => const SizedBox()))),
                   Positioned(
                       left: 12,
                       top: 12,
@@ -289,6 +500,20 @@ void _toolOptions(BuildContext context, CanvasController c, CanvasTool tool) {
                       Text(_toolName(tool),
                           style: Theme.of(context).textTheme.titleMedium),
                       const SizedBox(height: 12),
+                      if (tool == CanvasTool.pen) ...[
+                        const Text('笔尖'),
+                        const SizedBox(height: 6),
+                        Wrap(spacing: 8, runSpacing: 8, children: PenStyle.values
+                            .map((style) => ChoiceChip(
+                                label: Text(_penStyleName(style)),
+                                selected: c.penStyle == style,
+                                onSelected: (_) {
+                                  c.setPenStyle(style);
+                                  refresh(() {});
+                                }))
+                            .toList()),
+                        const SizedBox(height: 12),
+                      ],
                       Wrap(
                           spacing: 12,
                           runSpacing: 12,
@@ -314,6 +539,14 @@ void _toolOptions(BuildContext context, CanvasController c, CanvasTool tool) {
                     ]),
               ))));
 }
+
+String _penStyleName(PenStyle style) => switch (style) {
+      PenStyle.fountain => '钢笔',
+      PenStyle.pencil => '铅笔',
+      PenStyle.ballpoint => '圆珠笔',
+      PenStyle.brush => '毛笔',
+      PenStyle.calligraphy => '秀丽笔',
+    };
 
 String _toolName(CanvasTool t) => switch (t) {
       CanvasTool.pen => '画笔设置',

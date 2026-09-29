@@ -13,6 +13,9 @@ enum CanvasTool {
   pan
 }
 
+/// 普通画笔的笔尖效果。它独立于荧光笔、激光笔等其它工具的设置。
+enum PenStyle { fountain, pencil, ballpoint, brush, calligraphy }
+
 enum CanvasBackground { blank, grid, warm }
 
 enum AppThemeMode { system, light, dark }
@@ -82,6 +85,7 @@ class Stroke {
       required this.colorValue,
       required this.width,
       this.tool = CanvasTool.pen,
+      this.penStyle = PenStyle.fountain,
       this.isErased = false})
       : points = List.unmodifiable(points);
   factory Stroke.pen(
@@ -89,18 +93,21 @@ class Stroke {
           required List<StrokePoint> points,
           required int colorValue,
           required double width,
-          CanvasTool tool = CanvasTool.pen}) =>
+          CanvasTool tool = CanvasTool.pen,
+          PenStyle penStyle = PenStyle.fountain}) =>
       Stroke(
           id: id,
           points: points,
           colorValue: colorValue,
           width: width,
-          tool: tool);
+          tool: tool,
+          penStyle: penStyle);
   final String id;
   final List<StrokePoint> points;
   final int colorValue;
   final double width;
   final CanvasTool tool;
+  final PenStyle penStyle;
   final bool isErased;
   Path? _cachedPath;
   Rect? _cachedBounds;
@@ -113,6 +120,7 @@ class Stroke {
           int? colorValue,
           double? width,
           CanvasTool? tool,
+          PenStyle? penStyle,
           bool? isErased}) =>
       Stroke(
           id: id ?? this.id,
@@ -120,6 +128,7 @@ class Stroke {
           colorValue: colorValue ?? this.colorValue,
           width: width ?? this.width,
           tool: tool ?? this.tool,
+          penStyle: penStyle ?? this.penStyle,
           isErased: isErased ?? this.isErased);
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -127,6 +136,7 @@ class Stroke {
         'color': colorValue,
         'width': width,
         'tool': tool.name,
+        'penStyle': penStyle.name,
         'erased': isErased
       };
   factory Stroke.fromJson(Map<String, dynamic> j) => Stroke(
@@ -137,6 +147,7 @@ class Stroke {
       colorValue: (j['color'] as num? ?? 0xff111827).toInt(),
       width: (j['width'] as num? ?? 3).toDouble(),
       tool: _toolFromName(j['tool'] as String?),
+      penStyle: _penStyleFromName(j['penStyle'] as String?),
       isErased: j['erased'] as bool? ?? false);
   bool hitTest(Offset p, double radius) {
     final threshold = radius + width / 2;
@@ -187,6 +198,14 @@ class Stroke {
     return (p - Offset(a.dx + v.dx * k, a.dy + v.dy * k)).distance;
   }
 }
+
+PenStyle _penStyleFromName(String? name) => switch (name) {
+      'pencil' => PenStyle.pencil,
+      'ballpoint' => PenStyle.ballpoint,
+      'brush' => PenStyle.brush,
+      'calligraphy' => PenStyle.calligraphy,
+      _ => PenStyle.fountain,
+    };
 
 CanvasTool _toolFromName(String? name) => switch (name) {
       'highlighter' => CanvasTool.highlighter,
@@ -276,16 +295,38 @@ class CanvasText {
 
 class DocumentSummary {
   const DocumentSummary(
-      {required this.id, required this.title, required this.updatedAt});
+      {required this.id,
+      required this.title,
+      required this.updatedAt,
+      this.isFavorite = false,
+      this.isLocked = false,
+      this.isDeleted = false,
+      this.coverPath});
   final String id;
   final String title;
   final DateTime updatedAt;
+  final bool isFavorite;
+  final bool isLocked;
+  final bool isDeleted;
+  final String? coverPath;
   Map<String, dynamic> toJson() =>
-      {'id': id, 'title': title, 'updatedAt': updatedAt.toIso8601String()};
+      {
+        'id': id,
+        'title': title,
+        'updatedAt': updatedAt.toIso8601String(),
+        'favorite': isFavorite,
+        'locked': isLocked,
+        'deleted': isDeleted,
+        'coverPath': coverPath,
+      };
   factory DocumentSummary.fromJson(Map<String, dynamic> j) => DocumentSummary(
       id: j['id'] as String,
       title: j['title'] as String,
-      updatedAt: DateTime.parse(j['updatedAt'] as String));
+      updatedAt: DateTime.parse(j['updatedAt'] as String),
+      isFavorite: j['favorite'] as bool? ?? false,
+      isLocked: j['locked'] as bool? ?? false,
+      isDeleted: j['deleted'] as bool? ?? false,
+      coverPath: j['coverPath'] as String?);
 }
 
 class DocumentModel {
@@ -298,7 +339,11 @@ class DocumentModel {
       List<Stroke> strokes = const [],
       List<CanvasImage> images = const [],
       List<CanvasText> texts = const [],
-      this.background = CanvasBackground.blank})
+      this.background = CanvasBackground.blank,
+      this.isFavorite = false,
+      this.isLocked = false,
+      this.isDeleted = false,
+      this.coverPath})
       : strokes = List.unmodifiable(strokes),
         images = List.unmodifiable(images),
         texts = List.unmodifiable(texts);
@@ -311,6 +356,10 @@ class DocumentModel {
   final List<CanvasImage> images;
   final List<CanvasText> texts;
   final CanvasBackground background;
+  final bool isFavorite;
+  final bool isLocked;
+  final bool isDeleted;
+  final String? coverPath;
   DocumentModel copyWith(
           {String? title,
           DateTime? updatedAt,
@@ -318,7 +367,12 @@ class DocumentModel {
           List<Stroke>? strokes,
           List<CanvasImage>? images,
           List<CanvasText>? texts,
-          CanvasBackground? background}) =>
+          CanvasBackground? background,
+          bool? isFavorite,
+          bool? isLocked,
+          bool? isDeleted,
+          String? coverPath,
+          bool clearCover = false}) =>
       DocumentModel(
           id: id,
           title: title ?? this.title,
@@ -328,9 +382,20 @@ class DocumentModel {
           strokes: strokes ?? this.strokes,
           images: images ?? this.images,
           texts: texts ?? this.texts,
-          background: background ?? this.background);
+          background: background ?? this.background,
+          isFavorite: isFavorite ?? this.isFavorite,
+          isLocked: isLocked ?? this.isLocked,
+          isDeleted: isDeleted ?? this.isDeleted,
+          coverPath: clearCover ? null : coverPath ?? this.coverPath);
   DocumentSummary get summary =>
-      DocumentSummary(id: id, title: title, updatedAt: updatedAt);
+      DocumentSummary(
+          id: id,
+          title: title,
+          updatedAt: updatedAt,
+          isFavorite: isFavorite,
+          isLocked: isLocked,
+          isDeleted: isDeleted,
+          coverPath: coverPath);
   Map<String, dynamic> toJson() => {
         'id': id,
         'title': title,
@@ -338,6 +403,10 @@ class DocumentModel {
         'updatedAt': updatedAt.toIso8601String(),
         'viewport': viewport.toJson(),
         'background': background.name,
+        'favorite': isFavorite,
+        'locked': isLocked,
+        'deleted': isDeleted,
+        'coverPath': coverPath,
         'strokes': strokes.map((s) => s.toJson()).toList(),
         'images': images.map((i) => i.toJson()).toList(),
         'texts': texts.map((t) => t.toJson()).toList()
@@ -348,9 +417,15 @@ class DocumentModel {
       createdAt: DateTime.parse(j['createdAt'] as String),
       updatedAt: DateTime.parse(j['updatedAt'] as String),
       viewport: Viewport.fromJson(j['viewport'] as Map<String, dynamic>?),
-      background: j['background'] == 'grid'
-          ? CanvasBackground.grid
-          : CanvasBackground.blank,
+      background: switch (j['background']) {
+        'grid' => CanvasBackground.grid,
+        'warm' => CanvasBackground.warm,
+        _ => CanvasBackground.blank,
+      },
+      isFavorite: j['favorite'] as bool? ?? false,
+      isLocked: j['locked'] as bool? ?? false,
+      isDeleted: j['deleted'] as bool? ?? false,
+      coverPath: j['coverPath'] as String?,
       strokes: (j['strokes'] as List<dynamic>? ?? const [])
           .map((e) => Stroke.fromJson(e as Map<String, dynamic>))
           .toList(),

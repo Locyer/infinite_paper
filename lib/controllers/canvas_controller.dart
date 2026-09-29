@@ -22,6 +22,7 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
       activeRepaint = ValueNotifier(0);
   final List<_Snapshot> _undoStack = [], _redoStack = [];
   Timer? _saveTimer, _laserTimer;
+  DateTime? _laserFadeStartedAt;
   late DocumentModel _document;
   List<DocumentSummary> _summaries = [];
   List<StrokePoint>? _activePoints;
@@ -36,6 +37,7 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   bool _selectionMoved = false;
   double _transformRotationApplied = 0;
   CanvasTool _tool = CanvasTool.pen;
+  PenStyle _penStyle = PenStyle.fountain;
   AppThemeMode _themeMode = AppThemeMode.system;
   CanvasInputMode _inputMode = CanvasInputMode.penAndTouch;
   int _penColorValue = 0xff111827;
@@ -52,6 +54,7 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   DocumentModel get document => _document;
   List<DocumentSummary> get summaries => List.unmodifiable(_summaries);
   CanvasTool get tool => _tool;
+  PenStyle get penStyle => _penStyle;
   AppThemeMode get themeMode => _themeMode;
   CanvasInputMode get inputMode => _inputMode;
   int get colorValue => switch (_tool) {
@@ -93,6 +96,13 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
       _document.strokes.where((s) => !s.isErased).toList(growable: false);
   List<Offset>? get lassoPoints => _lassoPoints;
   List<Stroke> get laserStrokes => _laserStrokes;
+  /// 最近一次激光书写会让尚未完全消失的轨迹重新完整显示并重新计时。
+  double get laserOpacity {
+    final started = _laserFadeStartedAt;
+    if (started == null || _laserStrokes.isEmpty) return 1;
+    final elapsed = DateTime.now().difference(started).inMilliseconds;
+    return (1 - elapsed / 3000).clamp(0, 1).toDouble();
+  }
   Stroke? get activeStroke {
     final p = _activePoints;
     if (p == null || p.isEmpty) return null;
@@ -101,7 +111,8 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
         points: p,
         colorValue: colorValue,
         width: _activeWidth,
-        tool: _tool);
+        tool: _tool,
+        penStyle: _penStyle);
   }
 
   double get _activeWidth => switch (_tool) {
@@ -112,7 +123,7 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> open() async {
     _summaries = await _repository.loadIndex();
-    for (final s in _summaries) {
+    for (final s in _summaries.where((summary) => !summary.isDeleted)) {
       final loaded = await _repository.loadDocument(s.id);
       if (loaded != null) {
         _document = loaded;
@@ -192,6 +203,46 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
+  Future<void> setFavorite(bool value) async {
+    _document = _document.copyWith(
+        isFavorite: value, updatedAt: DateTime.now());
+    await _saveNow();
+    notifyListeners();
+  }
+
+  Future<void> setLocked(bool value) async {
+    _document = _document.copyWith(isLocked: value, updatedAt: DateTime.now());
+    await _saveNow();
+    notifyListeners();
+  }
+
+  /// 回收站采用软删除，个人笔记可在书架中恢复。
+  Future<void> moveCurrentToTrash() async {
+    _document = _document.copyWith(isDeleted: true, updatedAt: DateTime.now());
+    await _saveNow();
+    _ready = false;
+    await open();
+  }
+
+  Future<void> restoreCurrentDocument() async {
+    _document = _document.copyWith(isDeleted: false, updatedAt: DateTime.now());
+    await _saveNow();
+    notifyListeners();
+  }
+
+  Future<void> setCover(File source) async {
+    final path = await _copyToAssetStore(source);
+    _document = _document.copyWith(coverPath: path, updatedAt: DateTime.now());
+    await _saveNow();
+    notifyListeners();
+  }
+
+  Future<void> removeCover() async {
+    _document = _document.copyWith(clearCover: true, updatedAt: DateTime.now());
+    await _saveNow();
+    notifyListeners();
+  }
+
   Future<void> removeCurrentDocument() async {
     final id = _document.id;
     await _repository.deleteDocument(id);
@@ -209,6 +260,11 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
       _selectionPath = null;
       _selectionPresentation = SelectionPresentation.none;
     }
+    notifyListeners();
+  }
+
+  void setPenStyle(PenStyle value) {
+    _penStyle = value;
     notifyListeners();
   }
 
@@ -293,12 +349,18 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
             id: _uuid.v4(),
             points: points,
             colorValue: colorValue,
-            width: _laserWidth)
+            width: _laserWidth,
+            tool: CanvasTool.laser)
       ];
       _touchCompleted();
       _laserTimer?.cancel();
-      _laserTimer = Timer(const Duration(seconds: 3), () {
-        _laserStrokes = [];
+      _laserFadeStartedAt = DateTime.now();
+      _laserTimer = Timer.periodic(const Duration(milliseconds: 33), (timer) {
+        if (laserOpacity <= 0) {
+          timer.cancel();
+          _laserStrokes = [];
+          _laserFadeStartedAt = null;
+        }
         _touchCompleted();
       });
       return;
@@ -308,7 +370,8 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
         points: points,
         colorValue: colorValue,
         width: _activeWidth,
-        tool: _tool));
+        tool: _tool,
+        penStyle: _penStyle));
   }
 
   void cancelActiveStroke() {
@@ -864,19 +927,10 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> insertImage(File source, Offset world) async {
-    final dir = await getApplicationDocumentsDirectory();
-    final assets =
-        Directory('${dir.path}${Platform.pathSeparator}canvas_assets');
-    if (!await assets.exists()) await assets.create(recursive: true);
-    final ext = source.path.contains('.')
-        ? source.path.substring(source.path.lastIndexOf('.'))
-        : '.jpg';
-    final target =
-        File('${assets.path}${Platform.pathSeparator}${_uuid.v4()}$ext');
-    await source.copy(target.path);
+    final path = await _copyToAssetStore(source);
     final image = CanvasImage(
         id: _uuid.v4(),
-        path: target.path,
+        path: path,
         rect: Rect.fromLTWH(world.dx, world.dy, 240, 180));
     _mutate((d) => d.copyWith(images: [...d.images, image]));
     _selection = {'i:${image.id}'};
@@ -884,6 +938,18 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
     _selectionPresentation = SelectionPresentation.object;
     _tool = CanvasTool.select;
     notifyListeners();
+  }
+
+  Future<String> _copyToAssetStore(File source) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final assets = Directory('${dir.path}${Platform.pathSeparator}canvas_assets');
+    if (!await assets.exists()) await assets.create(recursive: true);
+    final ext = source.path.contains('.')
+        ? source.path.substring(source.path.lastIndexOf('.'))
+        : '.jpg';
+    final target = File('${assets.path}${Platform.pathSeparator}${_uuid.v4()}$ext');
+    await source.copy(target.path);
+    return target.path;
   }
 
   void insertText(String text, Offset world) {

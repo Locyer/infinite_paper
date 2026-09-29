@@ -32,6 +32,25 @@ void main() {
     expect(restored.points, stroke.points);
   });
 
+  test('stroke preserves its selected pen style when saved', () {
+    final stroke = Stroke.pen(
+        id: 'brush',
+        colorValue: 0xff123456,
+        width: 6,
+        penStyle: PenStyle.calligraphy,
+        points: const [StrokePoint(x: 1, y: 1, pressure: 1, time: 0)]);
+    expect(Stroke.fromJson(stroke.toJson()).penStyle, PenStyle.calligraphy);
+  });
+
+  test('summary persists shelf status and cover metadata', () {
+    final summary = DocumentSummary(
+        id: 'note', title: '收藏', updatedAt: DateTime(2026),
+        isFavorite: true, isLocked: true, isDeleted: true, coverPath: '/cover.png');
+    final restored = DocumentSummary.fromJson(summary.toJson());
+    expect(restored.isFavorite && restored.isLocked && restored.isDeleted, isTrue);
+    expect(restored.coverPath, '/cover.png');
+  });
+
   test('stroke hit test finds a nearby segment but not a distant point', () {
     final stroke = Stroke.pen(
       id: 's',

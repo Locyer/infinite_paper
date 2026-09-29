@@ -80,6 +80,25 @@ void main() {
     expect(controller.colorValue, 0xff111111);
   });
 
+  test('pen style is attached to completed pen strokes only', () {
+    controller.setPenStyle(PenStyle.brush);
+    controller.beginStroke(const Offset(0, 0), pressure: 1);
+    controller.appendPoint(const Offset(8, 0), pressure: 1);
+    controller.endStroke();
+    expect(controller.document.strokes.single.penStyle, PenStyle.brush);
+    controller.setTool(CanvasTool.highlighter);
+    expect(controller.penStyle, PenStyle.brush);
+  });
+
+  test('favorite and trash status survive an index reload', () async {
+    final id = controller.document.id;
+    await controller.setFavorite(true);
+    await controller.moveCurrentToTrash();
+    final stored = (await repository.loadIndex()).singleWhere((s) => s.id == id);
+    expect(stored.isFavorite, isTrue);
+    expect(stored.isDeleted, isTrue);
+  });
+
   test('select tool can hit an inserted text object and move it', () {
     controller.insertText('可移动文本', const Offset(40, 60));
     final original = controller.document.texts.single;

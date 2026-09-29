@@ -175,6 +175,13 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
   }
 
   void _loadImages() {
+    final activePaths = c.document.images.map((item) => item.path).toSet();
+    final stale = _images.keys
+        .where((path) => !activePaths.contains(path))
+        .toList();
+    for (final path in stale) {
+      _images.remove(path)?.dispose();
+    }
     for (final item in c.document.images) {
       if (_images.containsKey(item.path)) continue;
       _decode(item.path);
@@ -183,14 +190,27 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
 
   Future<void> _decode(String path) async {
     try {
-      final codec =
-          await ui.instantiateImageCodec(await File(path).readAsBytes());
+      // 缓存用于编辑的预览图，避免高像素照片长期占满图形内存。
+      final codec = await ui.instantiateImageCodec(
+          await File(path).readAsBytes(), targetWidth: 2048);
       final frame = await codec.getNextFrame();
-      if (mounted) {
+      codec.dispose();
+      if (mounted && c.document.images.any((item) => item.path == path)) {
         setState(() => _images[path] = frame.image);
         c.completedRepaint.value++;
+      } else {
+        frame.image.dispose();
       }
     } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    for (final image in _images.values) {
+      image.dispose();
+    }
+    _images.clear();
+    super.dispose();
   }
 
   _SelectionGeometry? get _selectionGeometry {
@@ -355,7 +375,8 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
                           selection: c.selection,
                           selectionPath: c.selectionPath,
                           selectionPresentation: c.selectionPresentation,
-                          laser: c.laserStrokes)))),
+                          laser: c.laserStrokes,
+                          laserOpacity: c.laserOpacity)))),
           RepaintBoundary(
               child: ValueListenableBuilder<int>(
                   valueListenable: c.activeRepaint,
@@ -423,13 +444,6 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
     if (action == 'paste') c.pasteAt(world(localPosition));
   }
 
-  @override
-  void dispose() {
-    for (final image in _images.values) {
-      image.dispose();
-    }
-    super.dispose();
-  }
 }
 
 enum _TransformHandle {
@@ -655,7 +669,8 @@ class _CompletedPainter extends CustomPainter {
       required this.selection,
       required this.selectionPath,
       required this.selectionPresentation,
-      required this.laser});
+      required this.laser,
+      required this.laserOpacity});
   final DocumentModel document;
   final Viewport viewport;
   final Map<String, ui.Image> images;
@@ -664,6 +679,7 @@ class _CompletedPainter extends CustomPainter {
   final List<Offset>? selectionPath;
   final SelectionPresentation selectionPresentation;
   final List<Stroke> laser;
+  final double laserOpacity;
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(
@@ -713,7 +729,7 @@ class _CompletedPainter extends CustomPainter {
       }
     }
     for (final s in laser) {
-      _stroke(canvas, s, laser: true);
+      _stroke(canvas, s, laser: true, opacity: laserOpacity);
     }
     if (selectionPresentation == SelectionPresentation.lassoPath &&
         selectionPath != null && selectionPath!.length > 2) {
@@ -797,19 +813,36 @@ Path _dashed(Path source, double dash, double gap) {
   return result;
 }
 
-void _stroke(Canvas canvas, Stroke s, {bool laser = false}) {
+void _stroke(Canvas canvas, Stroke s, {bool laser = false, double opacity = 1}) {
   final high = s.tool == CanvasTool.highlighter;
+  final style = s.penStyle;
+  final pencil = !laser && !high && style == PenStyle.pencil;
+  final brush = !laser && !high && style == PenStyle.brush;
+  final calligraphy = !laser && !high && style == PenStyle.calligraphy;
+  final ballpoint = !laser && !high && style == PenStyle.ballpoint;
   final p = Paint()
     ..color = high
         ? s.color.withValues(alpha: .3)
-        : (laser ? s.color.withValues(alpha: .8) : s.color)
+        : (laser
+            ? s.color.withValues(alpha: .8 * opacity)
+            : pencil
+                ? s.color.withValues(alpha: .58)
+                : brush
+                    ? s.color.withValues(alpha: .9)
+                    : s.color.withValues(alpha: ballpoint ? .96 : 1))
     ..style = PaintingStyle.stroke
-    ..strokeWidth = s.width
-    ..strokeCap = StrokeCap.round
+    ..strokeWidth = s.width * (pencil ? .78 : brush ? 1.45 : ballpoint ? .84 : calligraphy ? 1.22 : 1)
+    ..strokeCap = calligraphy ? StrokeCap.square : StrokeCap.round
     ..strokeJoin = StrokeJoin.round
     ..isAntiAlias = true;
   if (high) p.blendMode = BlendMode.multiply;
   canvas.drawPath(s.path, p);
+  // 铅笔保留一层淡淡的石墨边缘，既轻量也让笔触与墨水笔区分明显。
+  if (pencil && s.points.length > 1) {
+    canvas.drawPath(s.path, p
+      ..color = s.color.withValues(alpha: .13)
+      ..strokeWidth = s.width * 1.25);
+  }
   if (s.points.length == 1)
     canvas.drawCircle(
         s.points.first.offset, s.width / 2, p..style = PaintingStyle.fill);

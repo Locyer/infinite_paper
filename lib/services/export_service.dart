@@ -37,19 +37,30 @@ class ExportService {
           document.background);
       canvas.scale(scale);
       canvas.translate(-bounds.left, -bounds.top);
-      for (final stroke in strokes) {
-        _paintStroke(canvas, stroke);
-      }
+      // 与编辑器一致：图片和文本作为底层，手写批注始终显示在上层。
       for (final item in document.images) {
         final decoded = await _loadImage(item.path);
         if (decoded != null) {
-          canvas.drawImageRect(decoded, ui.Rect.fromLTWH(0, 0, decoded.width.toDouble(), decoded.height.toDouble()), item.rect, ui.Paint());
+          canvas.save();
+          canvas.translate(item.rect.center.dx, item.rect.center.dy);
+          canvas.rotate(item.rotation);
+          canvas.drawImageRect(decoded,
+              ui.Rect.fromLTWH(0, 0, decoded.width.toDouble(), decoded.height.toDouble()),
+              item.rect.shift(-item.rect.center), ui.Paint());
+          canvas.restore();
           decoded.dispose();
         }
       }
       for (final item in document.texts) {
-        final painter = TextPainter(text: TextSpan(text: item.text, style: TextStyle(color: ui.Color(item.colorValue), fontSize: item.fontSize, height: 1.2)), textDirection: ui.TextDirection.ltr, maxLines: 6, ellipsis: '…')..layout(maxWidth: item.rect.width);
-        painter.paint(canvas, item.rect.topLeft);
+        final painter = TextPainter(text: TextSpan(text: item.text, style: TextStyle(color: ui.Color(item.colorValue), fontSize: item.fontSize, height: 1.2, fontFamily: item.fontFamily)), textDirection: ui.TextDirection.ltr, textAlign: item.alignment, maxLines: 6, ellipsis: '…')..layout(maxWidth: item.rect.width);
+        canvas.save();
+        canvas.translate(item.rect.center.dx, item.rect.center.dy);
+        canvas.rotate(item.rotation);
+        painter.paint(canvas, item.rect.topLeft - item.rect.center);
+        canvas.restore();
+      }
+      for (final stroke in strokes) {
+        _paintStroke(canvas, stroke);
       }
       final image = await recorder.endRecording().toImage(width, height);
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
@@ -92,8 +103,9 @@ class ExportService {
 
   void _paintBackground(
       ui.Canvas canvas, ui.Size size, CanvasBackground background) {
-    canvas.drawRect(
-        ui.Offset.zero & size, ui.Paint()..color = const ui.Color(0xffffffff));
+    canvas.drawRect(ui.Offset.zero & size,
+        ui.Paint()..color = background == CanvasBackground.warm
+            ? const ui.Color(0xfffffbeb) : const ui.Color(0xffffffff));
     if (background != CanvasBackground.grid) return;
     final paint = ui.Paint()
       ..color = const ui.Color(0xffe5e7eb)
@@ -107,15 +119,27 @@ class ExportService {
   }
 
   void _paintStroke(ui.Canvas canvas, Stroke stroke) {
+    final highlighter = stroke.tool == CanvasTool.highlighter;
+    final pencil = !highlighter && stroke.penStyle == PenStyle.pencil;
+    final brush = !highlighter && stroke.penStyle == PenStyle.brush;
+    final calligraphy = !highlighter && stroke.penStyle == PenStyle.calligraphy;
+    final ballpoint = !highlighter && stroke.penStyle == PenStyle.ballpoint;
     final paint = ui.Paint()
-      ..color = stroke.tool == CanvasTool.highlighter ? stroke.color.withValues(alpha: .3) : stroke.color
+      ..color = highlighter ? stroke.color.withValues(alpha: .3) : pencil
+          ? stroke.color.withValues(alpha: .58) : brush ? stroke.color.withValues(alpha: .9)
+          : stroke.color.withValues(alpha: ballpoint ? .96 : 1)
       ..style = ui.PaintingStyle.stroke
-      ..strokeCap = ui.StrokeCap.round
+      ..strokeCap = calligraphy ? ui.StrokeCap.square : ui.StrokeCap.round
       ..strokeJoin = ui.StrokeJoin.round
       ..isAntiAlias = true
-      ..strokeWidth = stroke.width;
-    if (stroke.tool == CanvasTool.highlighter) paint.blendMode = ui.BlendMode.multiply;
+      ..strokeWidth = stroke.width * (pencil ? .78 : brush ? 1.45 : ballpoint ? .84 : calligraphy ? 1.22 : 1);
+    if (highlighter) paint.blendMode = ui.BlendMode.multiply;
     canvas.drawPath(stroke.path, paint);
+    if (pencil && stroke.points.length > 1) {
+      canvas.drawPath(stroke.path, paint
+        ..color = stroke.color.withValues(alpha: .13)
+        ..strokeWidth = stroke.width * 1.25);
+    }
   }
 
   Future<ui.Image?> _loadImage(String path) async {
