@@ -60,4 +60,21 @@ void main() {
     final restored = await repository.loadDocument(originalId);
     expect(restored?.strokes, hasLength(1));
   });
+
+  test('laser has an active stroke before the pen leaves the screen', () {
+    controller.setTool(CanvasTool.laser);
+    controller.beginStroke(const Offset(1, 2), pressure: 1);
+    controller.appendPoint(const Offset(4, 2), pressure: 1);
+    expect(controller.activeStroke, isNotNull);
+    expect(controller.activeStroke?.tool, CanvasTool.laser);
+  });
+
+  test('each ink tool keeps its own color', () {
+    controller.setTool(CanvasTool.pen);
+    controller.setColor(0xff111111);
+    controller.setTool(CanvasTool.highlighter);
+    controller.setColor(0xff222222);
+    controller.setTool(CanvasTool.pen);
+    expect(controller.colorValue, 0xff111111);
+  });
 }

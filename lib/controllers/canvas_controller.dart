@@ -32,7 +32,9 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   CanvasTool _tool = CanvasTool.pen;
   AppThemeMode _themeMode = AppThemeMode.system;
   CanvasInputMode _inputMode = CanvasInputMode.penAndTouch;
-  int _colorValue = 0xff111827;
+  int _penColorValue = 0xff111827;
+  int _highlighterColorValue = 0xffffeb3b;
+  int _laserColorValue = 0xffff1744;
   double _penWidth = 3,
       _highlighterWidth = 16,
       _strokeEraserWidth = 20,
@@ -46,7 +48,11 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   CanvasTool get tool => _tool;
   AppThemeMode get themeMode => _themeMode;
   CanvasInputMode get inputMode => _inputMode;
-  int get colorValue => _colorValue;
+  int get colorValue => switch (_tool) {
+        CanvasTool.highlighter => _highlighterColorValue,
+        CanvasTool.laser => _laserColorValue,
+        _ => _penColorValue,
+      };
   double get penWidth => _penWidth;
   double get highlighterWidth => _highlighterWidth;
   double get strokeEraserWidth => _strokeEraserWidth;
@@ -64,15 +70,13 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   List<Stroke> get laserStrokes => _laserStrokes;
   Stroke? get activeStroke {
     final p = _activePoints;
-    if (p == null || p.isEmpty || _tool == CanvasTool.laser) return null;
+    if (p == null || p.isEmpty) return null;
     return Stroke.pen(
         id: 'active',
         points: p,
-        colorValue: _colorValue,
+        colorValue: colorValue,
         width: _activeWidth,
-        tool: _tool == CanvasTool.highlighter
-            ? CanvasTool.highlighter
-            : CanvasTool.pen);
+        tool: _tool);
   }
 
   double get _activeWidth => switch (_tool) {
@@ -173,7 +177,11 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void setColor(int value) {
-    _colorValue = value;
+    switch (_tool) {
+      case CanvasTool.highlighter: _highlighterColorValue = value;
+      case CanvasTool.laser: _laserColorValue = value;
+      default: _penColorValue = value;
+    }
     notifyListeners();
   }
 
@@ -248,7 +256,7 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
         Stroke.pen(
             id: _uuid.v4(),
             points: points,
-            colorValue: _colorValue,
+            colorValue: colorValue,
             width: _laserWidth)
       ];
       _touchCompleted();
@@ -262,7 +270,7 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
     addCompletedStroke(Stroke.pen(
         id: _uuid.v4(),
         points: points,
-        colorValue: _colorValue,
+        colorValue: colorValue,
         width: _activeWidth,
         tool: _tool));
   }
@@ -559,7 +567,7 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
         id: _uuid.v4(),
         text: text.trim(),
         rect: Rect.fromLTWH(world.dx, world.dy, 220, 80),
-        colorValue: _colorValue,
+        colorValue: colorValue,
         fontSize: 18);
     _mutate((d) => d.copyWith(texts: [...d.texts, item]));
   }

@@ -1,7 +1,7 @@
 name: infinite_paper
 description: 仅本机使用的无限画布草稿纸。
 publish_to: none
-version: 1.2.0+3
+version: 1.2.1+4
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

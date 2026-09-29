@@ -276,10 +276,6 @@ class _CompletedPainter extends CustomPainter {
     canvas.scale(viewport.scale);
     canvas.clipRect(visible);
     if (document.background == CanvasBackground.grid) _grid(canvas, visible);
-    for (final s in document.strokes) {
-      if (!s.isErased && s.bounds.inflate(s.width).overlaps(visible))
-        _stroke(canvas, s);
-    }
     for (final i in document.images) {
       if (i.rect.overlaps(visible)) {
         final image = images[i.path];
@@ -297,6 +293,12 @@ class _CompletedPainter extends CustomPainter {
       if (t.rect.overlaps(visible)) {
         _text(canvas, t);
         _select(canvas, t.rect, selection.contains('t:${t.id}'));
+      }
+    }
+    // 图片和文本是底图；墨迹始终在它们上面，便于批注。
+    for (final s in document.strokes) {
+      if (!s.isErased && s.bounds.inflate(s.width).overlaps(visible)) {
+        _stroke(canvas, s);
       }
     }
     for (final s in laser) {
@@ -348,15 +350,16 @@ class _ActivePainter extends CustomPainter {
     canvas.save();
     canvas.translate(viewport.offset.dx, viewport.offset.dy);
     canvas.scale(viewport.scale);
-    if (stroke != null) _stroke(canvas, stroke!);
+    if (stroke != null) _stroke(canvas, stroke!, laser: stroke!.tool == CanvasTool.laser);
     final p = lasso;
     if (p != null && p.isNotEmpty) {
       final path = Path()..moveTo(p.first.dx, p.first.dy);
       for (final q in p.skip(1)) {
         path.lineTo(q.dx, q.dy);
       }
+      path.close();
       canvas.drawPath(
-          path,
+          _dashed(path, 8 / viewport.scale, 5 / viewport.scale),
           Paint()
             ..color = const Color(0xff2563eb)
             ..style = PaintingStyle.stroke
@@ -367,6 +370,18 @@ class _ActivePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ActivePainter old) => true;
+}
+
+Path _dashed(Path source, double dash, double gap) {
+  final result = Path();
+  for (final metric in source.computeMetrics()) {
+    var distance = 0.0;
+    while (distance < metric.length) {
+      result.addPath(metric.extractPath(distance, (distance + dash).clamp(0, metric.length)), Offset.zero);
+      distance += dash + gap;
+    }
+  }
+  return result;
 }
 
 void _stroke(Canvas canvas, Stroke s, {bool laser = false}) {
