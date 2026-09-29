@@ -66,13 +66,24 @@ class _HomePageState extends State<HomePage> {
                       })
                   : null,
               appBar: AppBar(
+                  leading: _folderId == null
+                      ? null
+                      : IconButton(
+                          tooltip: '返回书架',
+                          onPressed: () => setState(() => _folderId = null),
+                          icon: const Icon(Icons.arrow_back)),
                   titleSpacing: 20,
-                  title: const Column(
+                  title: _folderId == null ? const Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Infinite Paper'),
                         Text('YOUR NOTE SHELF',
                             style: TextStyle(fontSize: 10, letterSpacing: 1.4))
+                      ]) : const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Folder'),
+                        Text('TAP ← TO RETURN', style: TextStyle(fontSize: 10, letterSpacing: 1.2))
                       ]),
                   actions: [
                     IconButton(
@@ -131,7 +142,8 @@ class _HomePageState extends State<HomePage> {
                           coverPath: s.coverPath,
                           onMore: () => _documentMenu(context, c, s));
                     });
-                if (constraints.maxWidth < 700) return shelf;
+                // 文件夹内隐藏书架左栏，页面层级一眼可分辨。
+                if (constraints.maxWidth < 700 || _folderId != null) return shelf;
                 return Row(children: [
                   SizedBox(width: 210, child: _FixedShelfSidebar(
                     section: _section,
@@ -515,14 +527,16 @@ class _ShelfNotebook extends StatelessWidget {
                     ]),
                 child: Stack(children: [
                   Positioned.fill(
-                      child: CustomPaint(painter: _PaperLinesPainter())),
+                      child: isFolder
+                          ? const SizedBox()
+                          : CustomPaint(painter: _PaperLinesPainter())),
                   if (coverPath != null)
                     Positioned.fill(
                         child: ClipRRect(
                             borderRadius: BorderRadius.circular(11),
                             child: Image.file(File(coverPath!), fit: BoxFit.cover,
                                 errorBuilder: (_, __, ___) => const SizedBox()))),
-                  Positioned(
+                  if (!isFolder) Positioned(
                       left: 12,
                       top: 12,
                       bottom: 12,
@@ -537,12 +551,14 @@ class _ShelfNotebook extends StatelessWidget {
                                       color: Color(0xff64748b),
                                       shape: BoxShape.circle))))),
                   Center(
-                      child: Icon(isCreate ? Icons.add : isFolder ? Icons.folder_copy_outlined : Icons.draw_outlined,
+                      child: Icon(isCreate ? Icons.add : isFolder ? Icons.folder_rounded : Icons.draw_outlined,
                           size: isCreate ? 48 : 34,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onPrimaryContainer
-                              .withValues(alpha: .72))),
+                          color: isFolder
+                              ? const Color(0xffd97706)
+                              : Theme.of(context)
+                                  .colorScheme
+                                  .onPrimaryContainer
+                                  .withValues(alpha: .72))),
                 ]))),
         const SizedBox(height: 8),
         Row(children: [
@@ -571,8 +587,26 @@ class _PaperLinesPainter extends CustomPainter {
   bool shouldRepaint(covariant _PaperLinesPainter oldDelegate) => false;
 }
 
-void _openEditor(BuildContext context) => Navigator.push(
-    context, MaterialPageRoute(builder: (_) => const EditorPage()));
+void _openEditor(BuildContext context) => Navigator.of(context).push(
+    PageRouteBuilder<void>(
+        transitionDuration: const Duration(milliseconds: 360),
+        reverseTransitionDuration: const Duration(milliseconds: 240),
+        pageBuilder: (_, __, ___) => const EditorPage(),
+        transitionsBuilder: (_, animation, __, child) {
+          // 纯合成层的缩放、位移、淡入；不抓取卡片位图，内存开销极低。
+          final curve = CurvedAnimation(
+              parent: animation, curve: Curves.easeOutCubic);
+          return FadeTransition(
+              opacity: Tween<double>(begin: .15, end: 1).animate(curve),
+              child: SlideTransition(
+                  position: Tween<Offset>(
+                          begin: const Offset(.045, .035), end: Offset.zero)
+                      .animate(curve),
+                  child: ScaleTransition(
+                      scale: Tween<double>(begin: .92, end: 1).animate(curve),
+                      alignment: Alignment.center,
+                      child: child)));
+        }));
 
 class EditorPage extends StatelessWidget {
   const EditorPage({super.key});

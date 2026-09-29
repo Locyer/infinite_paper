@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_paper/controllers/canvas_controller.dart';
 import 'package:infinite_paper/main.dart';
+import 'package:infinite_paper/pages/home_page.dart';
 import 'package:infinite_paper/services/document_repository.dart';
 import 'package:provider/provider.dart';
 
@@ -48,5 +49,17 @@ void main() {
 
     expect(find.byKey(const Key('selection-transform-overlay')), findsOneWidget);
     expect(find.byTooltip('复制'), findsOneWidget);
+  });
+
+  testWidgets('entering a folder exposes a shelf back action', (tester) async {
+    final controller = CanvasController(repository: MemoryDocumentRepository());
+    await controller.open();
+    await controller.createFolder('课程');
+    await tester.pumpWidget(ChangeNotifierProvider.value(
+        value: controller, child: const MaterialApp(home: HomePage())));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('课程'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('返回书架'), findsOneWidget);
   });
 }
