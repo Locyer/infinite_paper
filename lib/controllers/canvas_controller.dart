@@ -811,6 +811,14 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
             .toList()));
   }
 
+  void formatSelectedText({TextAlign? alignment, String? fontFamily, double? fontSize}) {
+    if (_selection.isEmpty) return;
+    _mutate((d) => d.copyWith(texts: d.texts.map((text) =>
+        _selection.contains('t:${text.id}') ? text.copyWith(
+            alignment: alignment, fontFamily: fontFamily,
+            fontSize: fontSize?.clamp(10, 72).toDouble()) : text).toList()));
+  }
+
   /// 旋转图片/文本；多个对象会围绕共同的选择中心旋转。
   void rotateSelection(double radians) {
     if (_selection.isEmpty) return;

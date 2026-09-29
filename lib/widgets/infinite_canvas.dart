@@ -28,6 +28,7 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
   Rect? _transformStartBounds;
   Offset? _transformStartWorld;
   double _transformStartRotation = 0;
+  bool _showSelectionActions = true;
   Offset? _eraserCursor;
   CanvasController get c => widget.controller;
   Offset world(Offset p) => c.document.viewport.screenToWorld(p);
@@ -59,6 +60,7 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
       if (c.tool == CanvasTool.select) {
         final p = world(e.localPosition);
         if (c.selectAt(p)) {
+          setState(() => _showSelectionActions = true);
           _selectionPointer = e.pointer;
           _lastSelectionWorld = p;
           c.beginMoveSelection();
@@ -212,6 +214,7 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
     _transformStartBounds = c.selectionBounds;
     _transformStartWorld = world(event.localPosition);
     _transformStartRotation = c.selectionRotation;
+    setState(() => _showSelectionActions = false);
     _lastSelectionWorld = _transformStartWorld;
     c.beginTransform();
     return true;
@@ -366,6 +369,7 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
                 child: _CanvasSelectionActions(
                     key: const Key('selection-transform-overlay'),
                     controller: c,
+                    showActions: _showSelectionActions,
                     geometry: _selectionGeometry ??
                         _SelectionGeometry.fromBounds(
                             c.selectionBounds!, c.document.viewport))),
@@ -485,14 +489,16 @@ class _SelectionGeometry {
 
 class _CanvasSelectionActions extends StatelessWidget {
   const _CanvasSelectionActions(
-      {super.key, required this.controller, required this.geometry});
+      {super.key, required this.controller, required this.geometry, required this.showActions});
   final CanvasController controller;
   final _SelectionGeometry geometry;
+  final bool showActions;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isImage = controller.selection.any((id) => id.startsWith('i:'));
+    final isText = controller.selection.any((id) => id.startsWith('t:'));
     final showBox = controller.hasTransformBox;
     final bubbleTop = geometry.rect.top > 92
         ? geometry.rect.top - 82
@@ -504,7 +510,7 @@ class _CanvasSelectionActions extends StatelessWidget {
                   geometry: geometry,
                   showBox: showBox,
                   angle: controller.selectionRotation))),
-      Positioned(
+      if (showActions) Positioned(
           top: bubbleTop,
           left: math.max(8, geometry.rect.left),
           child: Material(
@@ -532,6 +538,30 @@ class _CanvasSelectionActions extends StatelessWidget {
                               PopupMenuItem(value: 0xff16a34a, child: Text('绿色')),
                             ],
                             icon: const Icon(Icons.palette_outlined, size: 19)),
+                        if (isText)
+                          PopupMenuButton<String>(
+                              tooltip: '文字格式',
+                              onSelected: (value) {
+                                switch (value) {
+                                  case 'left': controller.formatSelectedText(alignment: TextAlign.left);
+                                  case 'center': controller.formatSelectedText(alignment: TextAlign.center);
+                                  case 'right': controller.formatSelectedText(alignment: TextAlign.right);
+                                  case 'small': controller.formatSelectedText(fontSize: 16);
+                                  case 'large': controller.formatSelectedText(fontSize: 28);
+                                  case 'serif': controller.formatSelectedText(fontFamily: 'serif');
+                                  case 'sans': controller.formatSelectedText(fontFamily: 'sans-serif');
+                                }
+                              },
+                              itemBuilder: (_) => const [
+                                PopupMenuItem(value: 'left', child: Text('左对齐')),
+                                PopupMenuItem(value: 'center', child: Text('居中对齐')),
+                                PopupMenuItem(value: 'right', child: Text('右对齐')),
+                                PopupMenuItem(value: 'small', child: Text('小字号')),
+                                PopupMenuItem(value: 'large', child: Text('大字号')),
+                                PopupMenuItem(value: 'serif', child: Text('衬线字体')),
+                                PopupMenuItem(value: 'sans', child: Text('无衬线字体')),
+                              ],
+                              icon: const Icon(Icons.format_size, size: 19)),
                         if (isImage)
                           PopupMenuButton<String>(
                               tooltip: '裁剪',
@@ -790,8 +820,10 @@ void _text(Canvas canvas, CanvasText t) {
       text: TextSpan(
           text: t.text,
           style: TextStyle(
-              color: Color(t.colorValue), fontSize: t.fontSize, height: 1.2)),
+              color: Color(t.colorValue), fontSize: t.fontSize, height: 1.2,
+              fontFamily: t.fontFamily)),
       textDirection: TextDirection.ltr,
+      textAlign: t.alignment,
       maxLines: 6,
       ellipsis: '…')
     ..layout(maxWidth: t.rect.width);

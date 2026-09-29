@@ -226,25 +226,29 @@ class CanvasText {
       required this.text,
       required this.rect,
       required this.colorValue,
-      required this.fontSize, this.rotation = 0});
+      required this.fontSize, this.rotation = 0, this.alignment = TextAlign.left,
+      this.fontFamily});
   final String id;
   final String text;
   final Rect rect;
   final int colorValue;
   final double fontSize;
   final double rotation;
+  final TextAlign alignment;
+  final String? fontFamily;
   CanvasText copyWith(
           {String? id,
           String? text,
           Rect? rect,
           int? colorValue,
-          double? fontSize, double? rotation}) =>
+          double? fontSize, double? rotation, TextAlign? alignment, String? fontFamily}) =>
       CanvasText(
           id: id ?? this.id,
           text: text ?? this.text,
           rect: rect ?? this.rect,
           colorValue: colorValue ?? this.colorValue,
-          fontSize: fontSize ?? this.fontSize, rotation: rotation ?? this.rotation);
+          fontSize: fontSize ?? this.fontSize, rotation: rotation ?? this.rotation,
+          alignment: alignment ?? this.alignment, fontFamily: fontFamily ?? this.fontFamily);
   Map<String, dynamic> toJson() => {
         'id': id,
         'text': text,
@@ -253,7 +257,8 @@ class CanvasText {
         'width': rect.width,
         'height': rect.height,
         'color': colorValue,
-        'fontSize': fontSize, 'rotation': rotation
+        'fontSize': fontSize, 'rotation': rotation, 'alignment': alignment.name,
+        'fontFamily': fontFamily
       };
   factory CanvasText.fromJson(Map<String, dynamic> j) => CanvasText(
       id: j['id'] as String,
@@ -264,7 +269,9 @@ class CanvasText {
           (j['width'] as num).toDouble(),
           (j['height'] as num).toDouble()),
       colorValue: (j['color'] as num? ?? 0xff111827).toInt(),
-      fontSize: (j['fontSize'] as num? ?? 18).toDouble(), rotation: (j['rotation'] as num? ?? 0).toDouble());
+      fontSize: (j['fontSize'] as num? ?? 18).toDouble(), rotation: (j['rotation'] as num? ?? 0).toDouble(),
+      alignment: switch (j['alignment']) { 'center' => TextAlign.center, 'right' => TextAlign.right, 'justify' => TextAlign.justify, _ => TextAlign.left },
+      fontFamily: j['fontFamily'] as String?);
 }
 
 class DocumentSummary {
