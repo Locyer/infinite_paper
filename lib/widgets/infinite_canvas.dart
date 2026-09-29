@@ -20,7 +20,9 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
   bool _transforming = false;
   double _lastScale = 1;
   int? _panPointer;
+  int? _selectionPointer;
   Offset? _lastPan;
+  Offset? _lastSelectionWorld;
   Offset? _eraserCursor;
   CanvasController get c => widget.controller;
   Offset world(Offset p) => c.document.viewport.screenToWorld(p);
@@ -28,7 +30,7 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
       e.kind == ui.PointerDeviceKind.stylus ||
       e.kind == ui.PointerDeviceKind.invertedStylus;
   bool _shouldDraw(PointerEvent e) {
-    if (c.tool == CanvasTool.pan) return false;
+    if ({CanvasTool.pan, CanvasTool.select}.contains(c.tool)) return false;
     if (c.inputMode == CanvasInputMode.fingerPan &&
         e.kind == ui.PointerDeviceKind.touch) return false;
     if (c.inputMode == CanvasInputMode.stylusOnly && !_isStylus(e))
@@ -44,6 +46,18 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
       return;
     }
     if (!_shouldDraw(e)) {
+      if (c.tool == CanvasTool.select) {
+        final p = world(e.localPosition);
+        if (c.selectAt(p)) {
+          _selectionPointer = e.pointer;
+          _lastSelectionWorld = p;
+          c.beginMoveSelection();
+        } else {
+          _panPointer = e.pointer;
+          _lastPan = e.localPosition;
+        }
+        return;
+      }
       _panPointer = e.pointer;
       _lastPan = e.localPosition;
       return;
@@ -62,6 +76,8 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
         c.partialEraseAt(p);
       case CanvasTool.lasso:
         c.beginLasso(p);
+      case CanvasTool.select:
+        break;
       case CanvasTool.pan:
         _panPointer = e.pointer;
         _lastPan = e.localPosition;
@@ -74,6 +90,13 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
       final old = _lastPan;
       _lastPan = e.localPosition;
       if (old != null) c.panViewport(e.localPosition - old);
+      return;
+    }
+    if (_selectionPointer == e.pointer) {
+      final old = _lastSelectionWorld;
+      final current = world(e.localPosition);
+      _lastSelectionWorld = current;
+      if (old != null) c.moveSelection(current - old);
       return;
     }
     final p = world(e.localPosition);
@@ -89,6 +112,8 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
         c.partialEraseAt(p);
       case CanvasTool.lasso:
         c.appendLasso(p);
+      case CanvasTool.select:
+        break;
       case CanvasTool.pan:
         break;
     }
@@ -101,6 +126,11 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
       _panPointer = null;
       _lastPan = null;
     }
+    if (_selectionPointer == e.pointer) {
+      _selectionPointer = null;
+      _lastSelectionWorld = null;
+      c.endMoveSelection();
+    }
     if (single) {
       switch (c.tool) {
         case CanvasTool.pen || CanvasTool.highlighter || CanvasTool.laser:
@@ -109,7 +139,7 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
           c.endPartialErase();
         case CanvasTool.lasso:
           c.endLasso();
-        case CanvasTool.eraserStroke || CanvasTool.pan:
+        case CanvasTool.eraserStroke || CanvasTool.pan || CanvasTool.select:
           break;
       }
     }
@@ -160,6 +190,11 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
       onPointerCancel: (e) {
         _pointers.remove(e.pointer);
         c.cancelActiveStroke();
+        if (_selectionPointer == e.pointer) {
+          _selectionPointer = null;
+          _lastSelectionWorld = null;
+          c.endMoveSelection();
+        }
         if (_pointers.isEmpty) _transforming = false;
         if (_pointers.isEmpty) setState(() => _eraserCursor = null);
       },
@@ -179,6 +214,14 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
           final delta = d.scale / _lastScale;
           if (delta != 1) c.updateViewportForScale(d.localFocalPoint, delta);
           _lastScale = d.scale;
+        },
+        onLongPressStart: (details) {
+          if (!c.hasClipboard ||
+              !{CanvasTool.select, CanvasTool.lasso, CanvasTool.pan}
+                  .contains(c.tool)) {
+            return;
+          }
+          _showPasteMenu(details.localPosition);
         },
         child: Stack(fit: StackFit.expand, children: [
           RepaintBoundary(
@@ -237,6 +280,19 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
 
   double get _eraserDiameter => (c.tool == CanvasTool.eraserPartial ? c.partialEraserWidth : c.strokeEraserWidth) * c.document.viewport.scale;
 
+  Future<void> _showPasteMenu(Offset localPosition) async {
+    final size = context.size;
+    if (size == null) return;
+    final action = await showMenu<String>(
+        context: context,
+        position: RelativeRect.fromLTRB(localPosition.dx, localPosition.dy,
+            size.width - localPosition.dx, size.height - localPosition.dy),
+        items: const [
+          PopupMenuItem(value: 'paste', child: Text('粘贴')),
+        ]);
+    if (action == 'paste') c.pasteAt(world(localPosition));
+  }
+
   @override
   void dispose() {
     for (final image in _images.values) {
@@ -279,13 +335,18 @@ class _CompletedPainter extends CustomPainter {
     for (final i in document.images) {
       if (i.rect.overlaps(visible)) {
         final image = images[i.path];
-        if (image != null)
+        if (image != null) {
+          canvas.save();
+          canvas.translate(i.rect.center.dx, i.rect.center.dy);
+          canvas.rotate(i.rotation);
           canvas.drawImageRect(
               image,
               Rect.fromLTWH(
                   0, 0, image.width.toDouble(), image.height.toDouble()),
-              i.rect,
+              i.rect.shift(-i.rect.center),
               Paint());
+          canvas.restore();
+        }
         _select(canvas, i.rect, selection.contains('i:${i.id}'));
       }
     }
@@ -332,7 +393,14 @@ class _CompletedPainter extends CustomPainter {
       ..color = const Color(0xff2563eb)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5 / viewport.scale;
-    c.drawRect(r.inflate(3 / viewport.scale), p);
+    final box = r.inflate(3 / viewport.scale);
+    c.drawRect(box, p);
+    final handle = 7 / viewport.scale;
+    final handlePaint = Paint()..color = const Color(0xffeff6ff);
+    for (final point in [box.topLeft, box.topRight, box.bottomLeft, box.bottomRight]) {
+      c.drawCircle(point, handle, handlePaint);
+      c.drawCircle(point, handle, p);
+    }
   }
 
   @override
@@ -412,5 +480,9 @@ void _text(Canvas canvas, CanvasText t) {
       maxLines: 6,
       ellipsis: '…')
     ..layout(maxWidth: t.rect.width);
-  painter.paint(canvas, t.rect.topLeft);
+  canvas.save();
+  canvas.translate(t.rect.center.dx, t.rect.center.dy);
+  canvas.rotate(t.rotation);
+  painter.paint(canvas, t.rect.topLeft - t.rect.center);
+  canvas.restore();
 }

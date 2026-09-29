@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
@@ -29,6 +30,8 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   List<Stroke> _laserStrokes = [];
   List<_ClipboardObject> _clipboard = [];
   Set<String> _selection = {};
+  DocumentModel? _selectionMoveBefore;
+  bool _selectionMoved = false;
   CanvasTool _tool = CanvasTool.pen;
   AppThemeMode _themeMode = AppThemeMode.system;
   CanvasInputMode _inputMode = CanvasInputMode.penAndTouch;
@@ -64,6 +67,7 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   String? get saveError => _saveError;
   Set<String> get selection => Set.unmodifiable(_selection);
   bool get hasSelection => _selection.isNotEmpty;
+  bool get hasClipboard => _clipboard.isNotEmpty;
   List<Stroke> get visibleStrokes =>
       _document.strokes.where((s) => !s.isErased).toList(growable: false);
   List<Offset>? get lassoPoints => _lassoPoints;
@@ -172,7 +176,10 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   void setTool(CanvasTool value) {
     cancelActiveStroke();
     _tool = value;
-    _selection = value == CanvasTool.lasso ? _selection : {};
+    // 套索和选择工具共享同一份选择结果；切回书写工具才结束选择。
+    if (!{CanvasTool.lasso, CanvasTool.select}.contains(value)) {
+      _selection = {};
+    }
     notifyListeners();
   }
 
@@ -412,6 +419,87 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
+  /// 从最上层开始命中对象。图片、文本可直接点选，不再必须依赖套索。
+  bool selectAt(Offset point) {
+    String? selected;
+    for (final text in _document.texts.reversed) {
+      if (text.rect.contains(point)) {
+        selected = 't:${text.id}';
+        break;
+      }
+    }
+    if (selected == null) {
+      for (final image in _document.images.reversed) {
+        if (image.rect.contains(point)) {
+          selected = 'i:${image.id}';
+          break;
+        }
+      }
+    }
+    if (selected == null) {
+      for (final stroke in visibleStrokes.reversed) {
+        if (stroke.hitTest(point, 10)) {
+          selected = 's:${stroke.id}';
+          break;
+        }
+      }
+    }
+    _selection = selected == null ? {} : {selected};
+    _touchCompleted();
+    notifyListeners();
+    return selected != null;
+  }
+
+  /// 在世界坐标中整体拖动已选内容，图片、文字和笔迹始终同步移动。
+  void beginMoveSelection() {
+    if (_selection.isEmpty) return;
+    _selectionMoveBefore = _document;
+    _selectionMoved = false;
+  }
+
+  void moveSelection(Offset delta) {
+    if (_selection.isEmpty || delta == Offset.zero) return;
+    final transform = (DocumentModel d) => d.copyWith(
+        strokes: d.strokes
+            .map((s) => _selection.contains('s:${s.id}')
+                ? s.copyWith(
+                    points: s.points
+                        .map((p) => StrokePoint(
+                            x: p.x + delta.dx,
+                            y: p.y + delta.dy,
+                            pressure: p.pressure,
+                            time: p.time))
+                        .toList())
+                : s)
+            .toList(),
+        images: d.images
+            .map((i) => _selection.contains('i:${i.id}')
+                ? i.copyWith(rect: i.rect.shift(delta))
+                : i)
+            .toList(),
+        texts: d.texts
+            .map((t) => _selection.contains('t:${t.id}')
+                ? t.copyWith(rect: t.rect.shift(delta))
+                : t)
+            .toList());
+    if (_selectionMoveBefore == null) {
+      _mutate(transform);
+      return;
+    }
+    _selectionMoved = true;
+    _document = transform(_document).copyWith(updatedAt: DateTime.now());
+    _touchCompleted();
+    notifyListeners();
+  }
+
+  void endMoveSelection() {
+    final before = _selectionMoveBefore;
+    _selectionMoveBefore = null;
+    if (before == null || !_selectionMoved) return;
+    _record(before: before, after: _document);
+    _afterMutation();
+  }
+
   void deleteSelection() {
     if (_selection.isEmpty) return;
     final ids = _selection;
@@ -431,7 +519,16 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void pasteSelection() {
+    pasteAt(null);
+  }
+
+  /// 锚定粘贴用于套索/选择状态下的长按菜单；空值保持原来的错位粘贴。
+  void pasteAt(Offset? anchor) {
     if (_clipboard.isEmpty) return;
+    final sourceBounds = _clipboardBounds();
+    final delta = anchor == null
+        ? const Offset(24, 24)
+        : anchor - (sourceBounds?.topLeft ?? Offset.zero);
     final addS = <Stroke>[], addI = <CanvasImage>[], addT = <CanvasText>[];
     for (final o in _clipboard) {
       switch (o) {
@@ -440,17 +537,17 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
               id: _uuid.v4(),
               points: value.points
                   .map((p) => StrokePoint(
-                      x: p.x + 24,
-                      y: p.y + 24,
+                      x: p.x + delta.dx,
+                      y: p.y + delta.dy,
                       pressure: p.pressure,
                       time: p.time))
                   .toList()));
         case _ClipImage(:final value):
           addI.add(value.copyWith(
-              id: _uuid.v4(), rect: value.rect.shift(const Offset(24, 24))));
+              id: _uuid.v4(), rect: value.rect.shift(delta)));
         case _ClipText(:final value):
           addT.add(value.copyWith(
-              id: _uuid.v4(), rect: value.rect.shift(const Offset(24, 24))));
+              id: _uuid.v4(), rect: value.rect.shift(delta)));
       }
     }
     _mutate((d) => d.copyWith(
@@ -475,6 +572,19 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
             .where((t) => _selection.contains('t:${t.id}'))
             .map(_ClipText.new)
       ];
+
+  Rect? _clipboardBounds() {
+    Rect? result;
+    for (final object in _clipboard) {
+      final bounds = switch (object) {
+        _ClipStroke(:final value) => value.bounds.inflate(value.width / 2),
+        _ClipImage(:final value) => value.rect,
+        _ClipText(:final value) => value.rect,
+      };
+      result = result == null ? bounds : result.expandToInclude(bounds);
+    }
+    return result;
+  }
   void scaleSelection(double factor) {
     if (_selection.isEmpty) return;
     final b = selectionBounds;
@@ -524,6 +634,31 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
             .toList()));
   }
 
+  /// 旋转图片/文本；多个对象会围绕共同的选择中心旋转。
+  void rotateSelection(double radians) {
+    if (_selection.isEmpty) return;
+    final bounds = selectionBounds;
+    if (bounds == null) return;
+    final center = bounds.center;
+    Offset rotatedCenter(Rect rect) {
+      final v = rect.center - center;
+      final cos = math.cos(radians), sin = math.sin(radians);
+      return center + Offset(v.dx * cos - v.dy * sin, v.dx * sin + v.dy * cos);
+    }
+    Rect movedRect(Rect rect) => rect.shift(rotatedCenter(rect) - rect.center);
+    _mutate((d) => d.copyWith(
+        images: d.images
+            .map((i) => _selection.contains('i:${i.id}')
+                ? i.copyWith(rect: movedRect(i.rect), rotation: i.rotation + radians)
+                : i)
+            .toList(),
+        texts: d.texts
+            .map((t) => _selection.contains('t:${t.id}')
+                ? t.copyWith(rect: movedRect(t.rect), rotation: t.rotation + radians)
+                : t)
+            .toList()));
+  }
+
   Rect? get selectionBounds {
     Rect? result;
     for (final s
@@ -559,6 +694,9 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
         path: target.path,
         rect: Rect.fromLTWH(world.dx, world.dy, 240, 180));
     _mutate((d) => d.copyWith(images: [...d.images, image]));
+    _selection = {'i:${image.id}'};
+    _tool = CanvasTool.select;
+    notifyListeners();
   }
 
   void insertText(String text, Offset world) {
@@ -570,6 +708,9 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
         colorValue: colorValue,
         fontSize: 18);
     _mutate((d) => d.copyWith(texts: [...d.texts, item]));
+    _selection = {'t:${item.id}'};
+    _tool = CanvasTool.select;
+    notifyListeners();
   }
 
   void clearDocument() {

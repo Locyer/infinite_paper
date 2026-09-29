@@ -77,4 +77,28 @@ void main() {
     controller.setTool(CanvasTool.pen);
     expect(controller.colorValue, 0xff111111);
   });
+
+  test('select tool can hit an inserted text object and move it', () {
+    controller.insertText('可移动文本', const Offset(40, 60));
+    final original = controller.document.texts.single;
+
+    expect(controller.selectAt(const Offset(60, 75)), isTrue);
+    expect(controller.selection, contains('t:${original.id}'));
+
+    controller.moveSelection(const Offset(25, -10));
+    expect(controller.document.texts.single.rect.topLeft,
+        const Offset(65, 50));
+  });
+
+  test('clipboard pastes selected text at the requested world position', () {
+    controller.insertText('可复制文本', const Offset(20, 30));
+    controller.selectAt(const Offset(30, 40));
+    controller.copySelection();
+
+    controller.pasteAt(const Offset(200, 300));
+
+    expect(controller.document.texts, hasLength(2));
+    expect(controller.document.texts.last.rect.topLeft,
+        const Offset(200, 300));
+  });
 }

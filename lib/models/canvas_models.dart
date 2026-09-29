@@ -8,6 +8,7 @@ enum CanvasTool {
   laser,
   eraserStroke,
   eraserPartial,
+  select,
   lasso,
   pan
 }

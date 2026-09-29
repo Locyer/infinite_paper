@@ -28,6 +28,7 @@ class BottomToolbar extends StatelessWidget {
                 _tool(Icons.auto_fix_high, '整笔橡皮', CanvasTool.eraserStroke),
                 _tool(
                     Icons.cleaning_services, '局部橡皮', CanvasTool.eraserPartial),
+                _tool(Icons.touch_app_outlined, '选择/移动', CanvasTool.select),
                 _tool(Icons.gesture_outlined, '套索', CanvasTool.lasso),
                 _tool(Icons.pan_tool_alt_outlined, '移动', CanvasTool.pan),
                 IconButton(

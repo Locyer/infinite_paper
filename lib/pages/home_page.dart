@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -18,54 +17,194 @@ class HomePage extends StatelessWidget {
           if (!c.isReady)
             return const Scaffold(
                 body: Center(child: CircularProgressIndicator()));
+          final colors = [
+            const Color(0xffdbeafe),
+            const Color(0xfffef3c7),
+            const Color(0xffd1fae5),
+            const Color(0xfffce7f3),
+            const Color(0xffe9d5ff),
+          ];
           return Scaffold(
-            appBar: AppBar(title: const Text('无限草稿纸')),
-            floatingActionButton: FloatingActionButton.extended(
-              onPressed: () async {
-                await c.createDocument();
-                if (context.mounted) _openEditor(context);
-              },
-              icon: const Icon(Icons.add),
-              label: const Text('新建笔记'),
-            ),
-            body: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
-              itemCount: c.summaries.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final s = c.summaries[index];
-                return Card(
-                    child: ListTile(
-                  leading: const CircleAvatar(child: Icon(Icons.draw_outlined)),
-                  title: Text(s.title),
-                  subtitle: Text('更新于 ${_date(s.updatedAt)}'),
-                  onTap: () async {
-                    if (await c.switchDocument(s.id) && context.mounted)
-                      _openEditor(context);
-                  },
-                  trailing: PopupMenuButton<String>(
-                    onSelected: (value) async {
-                      await c.switchDocument(s.id);
-                      if (!context.mounted) return;
-                      if (value == 'copy') await c.duplicateDocument();
-                      if (value == 'delete' &&
-                          await _confirm(context, '删除笔记', '删除后无法恢复。'))
-                        await c.removeCurrentDocument();
-                      if (value == 'rename' && context.mounted)
-                        _rename(context, c);
-                    },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(value: 'rename', child: Text('重命名')),
-                      PopupMenuItem(value: 'copy', child: Text('复制')),
-                      PopupMenuItem(value: 'delete', child: Text('删除')),
-                    ],
-                  ),
-                ));
-              },
-            ),
-          );
+              backgroundColor: Theme.of(context).brightness == Brightness.dark
+                  ? const Color(0xff171717)
+                  : const Color(0xfff4f3ef),
+              appBar: AppBar(
+                  titleSpacing: 20,
+                  title: const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Infinite Paper'),
+                        Text('YOUR NOTE SHELF',
+                            style: TextStyle(fontSize: 10, letterSpacing: 1.4))
+                      ]),
+                  actions: [
+                    IconButton(
+                        tooltip: '新建笔记',
+                        onPressed: () async {
+                          await c.createDocument();
+                          if (context.mounted) _openEditor(context);
+                        },
+                        icon: const Icon(Icons.add_circle_outline))
+                  ]),
+              body: LayoutBuilder(builder: (context, constraints) {
+                final columns = constraints.maxWidth >= 900
+                    ? 5
+                    : constraints.maxWidth >= 600
+                        ? 4
+                        : 2;
+                return GridView.builder(
+                    padding: const EdgeInsets.fromLTRB(18, 22, 18, 40),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: columns,
+                        childAspectRatio: .62,
+                        crossAxisSpacing: 18,
+                        mainAxisSpacing: 22),
+                    itemCount: c.summaries.length + 1,
+                    itemBuilder: (context, index) {
+                      if (index == 0) {
+                        return _ShelfNotebook(
+                            isCreate: true,
+                            color: Theme.of(context).colorScheme.primaryContainer,
+                            title: '新建笔记',
+                            subtitle: '开始一张无限草稿纸',
+                            onTap: () async {
+                              await c.createDocument();
+                              if (context.mounted) _openEditor(context);
+                            });
+                      }
+                      final s = c.summaries[index - 1];
+                      return _ShelfNotebook(
+                          color: colors[(index - 1) % colors.length],
+                          title: s.title,
+                          subtitle: '更新于 ${_date(s.updatedAt)}',
+                          onTap: () async {
+                            if (await c.switchDocument(s.id) && context.mounted) {
+                              _openEditor(context);
+                            }
+                          },
+                          onMore: () => _documentMenu(context, c, s));
+                    });
+              }));
         },
       );
+}
+
+Future<void> _documentMenu(
+    BuildContext context, CanvasController controller, DocumentSummary summary) async {
+  final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (_) => SafeArea(
+              child: Wrap(children: [
+            ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('重命名'),
+                onTap: () => Navigator.pop(context, 'rename')),
+            ListTile(
+                leading: const Icon(Icons.copy_outlined),
+                title: const Text('复制'),
+                onTap: () => Navigator.pop(context, 'copy')),
+            ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: const Text('删除', style: TextStyle(color: Colors.red)),
+                onTap: () => Navigator.pop(context, 'delete')),
+          ])));
+  if (action == null) return;
+  await controller.switchDocument(summary.id);
+  if (!context.mounted) return;
+  if (action == 'rename') {
+    _rename(context, controller);
+  } else if (action == 'copy') {
+    await controller.duplicateDocument();
+  } else if (action == 'delete' &&
+      await _confirm(context, '删除笔记', '删除后无法恢复。')) {
+    await controller.removeCurrentDocument();
+  }
+}
+
+class _ShelfNotebook extends StatelessWidget {
+  const _ShelfNotebook({
+      required this.color,
+      required this.title,
+      required this.subtitle,
+      required this.onTap,
+      this.isCreate = false,
+      this.onMore});
+  final Color color;
+  final String title, subtitle;
+  final VoidCallback onTap;
+  final bool isCreate;
+  final VoidCallback? onMore;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(
+            child: Container(
+                decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.black.withValues(alpha: .07)),
+                    boxShadow: [
+                      BoxShadow(
+                          color: Colors.black.withValues(alpha: .12),
+                          blurRadius: 10,
+                          offset: const Offset(0, 6))
+                    ]),
+                child: Stack(children: [
+                  Positioned.fill(
+                      child: CustomPaint(painter: _PaperLinesPainter())),
+                  Positioned(
+                      left: 12,
+                      top: 12,
+                      bottom: 12,
+                      child: Column(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: List.generate(
+                              8,
+                              (_) => Container(
+                                  width: 5,
+                                  height: 5,
+                                  decoration: const BoxDecoration(
+                                      color: Color(0xff64748b),
+                                      shape: BoxShape.circle))))),
+                  Center(
+                      child: Icon(isCreate ? Icons.add : Icons.draw_outlined,
+                          size: isCreate ? 48 : 34,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onPrimaryContainer
+                              .withValues(alpha: .72))),
+                  if (onMore != null)
+                    Positioned(
+                        top: 2,
+                        right: 1,
+                        child: IconButton(
+                            tooltip: '笔记操作',
+                            onPressed: onMore,
+                            icon: const Icon(Icons.more_horiz)))
+                ]))),
+        const SizedBox(height: 8),
+        Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w700)),
+        Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall)
+      ]));
+}
+
+class _PaperLinesPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xff94a3b8).withValues(alpha: .2)
+      ..strokeWidth = 1;
+    for (var y = 24.0; y < size.height; y += 18) {
+      canvas.drawLine(Offset(24, y), Offset(size.width - 8, y), paint);
+    }
+  }
+  @override
+  bool shouldRepaint(covariant _PaperLinesPainter oldDelegate) => false;
 }
 
 void _openEditor(BuildContext context) => Navigator.push(
@@ -165,6 +304,14 @@ class _SelectionBar extends StatelessWidget {
                 onPressed: () => controller.scaleSelection(1.25),
                 icon: const Icon(Icons.zoom_in)),
             IconButton(
+                tooltip: '左转 15°',
+                onPressed: () => controller.rotateSelection(-.261799),
+                icon: const Icon(Icons.rotate_left)),
+            IconButton(
+                tooltip: '右转 15°',
+                onPressed: () => controller.rotateSelection(.261799),
+                icon: const Icon(Icons.rotate_right)),
+            IconButton(
                 tooltip: '颜色',
                 onPressed: onColor,
                 icon: const Icon(Icons.palette_outlined)),
@@ -186,7 +333,7 @@ const _quickColors = [
   0xfffacc15
 ];
 void _toolOptions(BuildContext context, CanvasController c, CanvasTool tool) {
-  if (tool == CanvasTool.lasso || tool == CanvasTool.pan) {
+  if (tool == CanvasTool.lasso || tool == CanvasTool.pan || tool == CanvasTool.select) {
     c.setTool(tool);
     return;
   }
@@ -237,47 +384,9 @@ String _toolName(CanvasTool t) => switch (t) {
       CanvasTool.laser => '激光笔设置',
       CanvasTool.eraserStroke => '整笔橡皮设置',
       CanvasTool.eraserPartial => '局部橡皮设置',
+      CanvasTool.select => '选择工具',
       _ => '工具设置'
     };
-
-class _ColorSliders extends StatelessWidget {
-  const _ColorSliders({required this.controller, required this.refresh});
-  final CanvasController controller;
-  final StateSetter refresh;
-  @override
-  Widget build(BuildContext context) {
-    final color = Color(controller.colorValue);
-    Widget bar(
-            String n, int value, ValueChanged<double> change, Color active) =>
-        Row(children: [
-          SizedBox(width: 24, child: Text(n)),
-          Expanded(
-              child: Slider(
-                  min: 0,
-                  max: 255,
-                  value: value.toDouble(),
-                  activeColor: active,
-                  onChanged: change))
-        ]);
-    return Column(children: [
-      bar('R', color.red, (v) {
-        controller.setColor(
-            Color.fromARGB(255, v.round(), color.green, color.blue).value);
-        refresh(() {});
-      }, Colors.red),
-      bar('G', color.green, (v) {
-        controller.setColor(
-            Color.fromARGB(255, color.red, v.round(), color.blue).value);
-        refresh(() {});
-      }, Colors.green),
-      bar('B', color.blue, (v) {
-        controller.setColor(
-            Color.fromARGB(255, color.red, color.green, v.round()).value);
-        refresh(() {});
-      }, Colors.blue)
-    ]);
-  }
-}
 
 class _WidthSlider extends StatelessWidget {
   const _WidthSlider(
@@ -310,18 +419,36 @@ class _WidthSlider extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Expanded(child: Text('大小：${value.toStringAsFixed(0)}')),
-          Container(width: value.clamp(8, 48), height: value.clamp(8, 48), decoration: BoxDecoration(shape: BoxShape.circle, color: {CanvasTool.eraserStroke, CanvasTool.eraserPartial}.contains(tool) ? Colors.transparent : Color(controller.colorValue), border: Border.all(color: Theme.of(context).colorScheme.onSurface))),
-        ]),
-        Slider(
-            min: 1,
-            max: 100,
-            value: value,
-            onChanged: (v) {
-              set(v);
-              refresh(() {});
-            })
+        Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+          Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('大小：${value.toStringAsFixed(0)}'),
+            Slider(
+                min: 1,
+                max: 100,
+                value: value,
+                onChanged: (v) {
+                  set(v);
+                  refresh(() {});
+                })
+          ])),
+          // 固定预览区宽高，圆变大时不会挤动滑杆或底部面板。
+          SizedBox(
+              width: 96,
+              height: 96,
+              child: Center(
+                  child: Container(
+                      width: value.clamp(8, 64),
+                      height: value.clamp(8, 64),
+                      decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: {CanvasTool.eraserStroke, CanvasTool.eraserPartial}
+                                  .contains(tool)
+                              ? Colors.transparent
+                              : Color(controller.colorValue),
+                          border: Border.all(
+                              color: Theme.of(context).colorScheme.onSurface)))))
+        ])
       ]);
 }
 
@@ -336,6 +463,7 @@ Future<void> _insertImage(BuildContext context, CanvasController c) async {
   final selected = await ImagePicker()
       .pickImage(source: ImageSource.gallery, imageQuality: 90);
   if (selected == null) return;
+  if (!context.mounted) return;
   final size = MediaQuery.sizeOf(context);
   await c.insertImage(
       File(selected.path),
