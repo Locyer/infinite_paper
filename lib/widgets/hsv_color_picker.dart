@@ -7,7 +7,7 @@ class HsvColorPicker extends StatelessWidget {
   final ValueChanged<int> onChanged;
   @override Widget build(BuildContext context) {
     final hsv = HSVColor.fromColor(Color(colorValue));
-    return SizedBox(height: 220, child: Row(children: [
+    return SizedBox(height: 164, child: Row(children: [
       Expanded(child: LayoutBuilder(builder: (_, box) => GestureDetector(
         onPanDown: (d) => _pickSquare(d.localPosition, box.biggest, hsv.hue),
         onPanUpdate: (d) => _pickSquare(d.localPosition, box.biggest, hsv.hue),
@@ -29,7 +29,7 @@ class HsvColorPicker extends StatelessWidget {
       ))),
     ]));
   }
-  void _pickSquare(Offset p, Size size, double hue) { final s = (p.dx / size.width).clamp(0.0, 1.0); final v = (1 - p.dy / size.height).clamp(0.0, 1.0); onChanged(HSVColor.fromAHSV(1, hue, s, v).toColor().value); }
-  void _pickHue(double y, double height, HSVColor old) { onChanged(HSVColor.fromAHSV(1, (y / height).clamp(0.0, 1.0) * 360, old.saturation, old.value).toColor().value); }
+  void _pickSquare(Offset p, Size size, double hue) { final s = (p.dx / size.width).clamp(0.0, 1.0); final v = (1 - p.dy / size.height).clamp(0.0, 1.0); onChanged(HSVColor.fromAHSV(1, hue, s, v).toColor().toARGB32()); }
+  void _pickHue(double y, double height, HSVColor old) { onChanged(HSVColor.fromAHSV(1, (y / height).clamp(0.0, 1.0) * 360, old.saturation, old.value).toColor().toARGB32()); }
 }
 class _Ring extends StatelessWidget { const _Ring(); @override Widget build(BuildContext context) => Container(width: 24, height: 24, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3), boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 3)])); }

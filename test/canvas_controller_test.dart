@@ -99,6 +99,22 @@ void main() {
     expect(stored.isDeleted, isTrue);
   });
 
+  test('a locked document refuses an incorrect password after reload', () async {
+    final id = controller.document.id;
+    await controller.setLockPassword('1234');
+    await controller.createDocument(title: '另一页');
+    expect(await controller.switchDocument(id, password: '0000'), isFalse);
+    expect(await controller.switchDocument(id, password: '1234'), isTrue);
+  });
+
+  test('folder is a shelf item and documents can be assigned to it', () async {
+    final folderId = await controller.createFolder('课程');
+    await controller.assignCurrentDocumentToFolder(folderId);
+    final folder = (await repository.loadIndex()).singleWhere((s) => s.id == folderId);
+    expect(folder.isFolder, isTrue);
+    expect((await repository.loadIndex()).singleWhere((s) => s.id == controller.document.id).folderId, folderId);
+  });
+
   test('select tool can hit an inserted text object and move it', () {
     controller.insertText('可移动文本', const Offset(40, 60));
     final original = controller.document.texts.single;

@@ -22,6 +22,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   _ShelfSection _section = _ShelfSection.all;
   String _query = '';
+  String? _folderId;
 
   @override
   Widget build(BuildContext context) => Consumer<CanvasController>(
@@ -43,19 +44,27 @@ class _HomePageState extends State<HomePage> {
               _ShelfSection.locked => !s.isDeleted && s.isLocked,
               _ShelfSection.trash => s.isDeleted,
             };
-            return inSection &&
+            final inFolder = _folderId == null
+                ? (s.isFolder || s.folderId == null)
+                : !s.isFolder && s.folderId == _folderId;
+            return inSection && inFolder &&
                 s.title.toLowerCase().contains(_query.toLowerCase());
           }).toList();
           return Scaffold(
               backgroundColor: Theme.of(context).brightness == Brightness.dark
                   ? const Color(0xff171717)
                   : const Color(0xfff4f3ef),
-              drawer: _ShelfDrawer(
-                  section: _section,
-                  onChanged: (section) {
-                    setState(() => _section = section);
-                    Navigator.pop(context);
-                  }),
+              drawer: MediaQuery.sizeOf(context).width < 700
+                  ? _ShelfDrawer(
+                      section: _section,
+                      onChanged: (section) {
+                        setState(() {
+                          _section = section;
+                          _folderId = null;
+                        });
+                        Navigator.pop(context);
+                      })
+                  : null,
               appBar: AppBar(
                   titleSpacing: 20,
                   title: const Column(
@@ -79,7 +88,7 @@ class _HomePageState extends State<HomePage> {
                         icon: const Icon(Icons.search)),
                     IconButton(
                         tooltip: '新建或导入',
-                        onPressed: () => _createMenu(context, c),
+                        onPressed: () => _createMenu(context, c, folderId: _folderId),
                         icon: const Icon(Icons.add_circle_outline))
                   ]),
               body: LayoutBuilder(builder: (context, constraints) {
@@ -88,7 +97,7 @@ class _HomePageState extends State<HomePage> {
                     : constraints.maxWidth >= 600
                         ? 4
                         : 2;
-                return GridView.builder(
+                final shelf = GridView.builder(
                     padding: const EdgeInsets.fromLTRB(18, 22, 18, 40),
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: columns,
@@ -103,27 +112,34 @@ class _HomePageState extends State<HomePage> {
                             color: Theme.of(context).colorScheme.primaryContainer,
                             title: '新建笔记',
                             subtitle: '开始一张无限草稿纸',
-                            onTap: () => _createMenu(context, c));
+                            onTap: () => _createMenu(context, c, folderId: _folderId));
                       }
                       final realIndex = index - (_section == _ShelfSection.all ? 1 : 0);
                       final s = displayed[realIndex];
                       return _ShelfNotebook(
                           color: colors[(index - 1) % colors.length],
                           title: s.title,
-                          subtitle: '更新于 ${_date(s.updatedAt)}',
+                          isFolder: s.isFolder,
+                          subtitle: s.isFolder ? '文件夹' : '更新于 ${_date(s.updatedAt)}',
                           onTap: () async {
-                            if (await c.switchDocument(s.id) && context.mounted) {
-                              if (s.isDeleted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('请在“更多”中恢复笔记后再编辑')));
-                                return;
-                              }
-                              _openEditor(context);
+                            if (s.isFolder) {
+                              setState(() => _folderId = s.id);
+                            } else {
+                              await _openSummary(context, c, s);
                             }
                           },
                           coverPath: s.coverPath,
                           onMore: () => _documentMenu(context, c, s));
                     });
+                if (constraints.maxWidth < 700) return shelf;
+                return Row(children: [
+                  SizedBox(width: 210, child: _FixedShelfSidebar(
+                    section: _section,
+                    onChanged: (section) => setState(() { _section = section; _folderId = null; }),
+                  )),
+                  const VerticalDivider(width: 1),
+                  Expanded(child: shelf),
+                ]);
               }));
         },
       );
@@ -160,6 +176,26 @@ class _ShelfDrawer extends StatelessWidget {
           onTap: () => onChanged(value)));
 }
 
+class _FixedShelfSidebar extends StatelessWidget {
+  const _FixedShelfSidebar({required this.section, required this.onChanged});
+  final _ShelfSection section;
+  final ValueChanged<_ShelfSection> onChanged;
+  @override
+  Widget build(BuildContext context) => SafeArea(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Padding(padding: EdgeInsets.fromLTRB(22, 26, 12, 18),
+          child: Text('我的笔记', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+        _row(Icons.notes_outlined, '全部笔记', _ShelfSection.all),
+        _row(Icons.star_border, '我的收藏', _ShelfSection.favorites),
+        _row(Icons.lock_outline, '已加锁笔记', _ShelfSection.locked),
+        _row(Icons.delete_outline, '最近删除', _ShelfSection.trash),
+      ]));
+  Widget _row(IconData icon, String title, _ShelfSection value) => Builder(
+      builder: (context) => ListTile(
+          dense: true, leading: Icon(icon), title: Text(title),
+          selected: section == value, onTap: () => onChanged(value)));
+}
+
 class _NoteSearchDelegate extends SearchDelegate<String> {
   _NoteSearchDelegate(this.notes);
   final List<DocumentSummary> notes;
@@ -184,8 +220,49 @@ class _NoteSearchDelegate extends SearchDelegate<String> {
   }
 }
 
+Future<void> _openSummary(BuildContext context, CanvasController controller,
+    DocumentSummary summary) async {
+  if (summary.isDeleted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请在“更多”中恢复笔记后再编辑')));
+    return;
+  }
+  String? password;
+  if (summary.isLocked) {
+    password = await _passwordDialog(context, title: '输入笔记密码');
+    if (password == null) return;
+  }
+  if (await controller.switchDocument(summary.id, password: password) && context.mounted) {
+    _openEditor(context);
+  } else if (context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('密码不正确，无法打开笔记')));
+  }
+}
+
 Future<void> _documentMenu(
     BuildContext context, CanvasController controller, DocumentSummary summary) async {
+  if (summary.isFolder) {
+    final action = await showModalBottomSheet<String>(
+        context: context,
+        builder: (sheet) => SafeArea(child: Wrap(children: [
+              ListTile(leading: const Icon(Icons.edit_outlined), title: const Text('重命名文件夹'),
+                  onTap: () => Navigator.pop(sheet, 'rename')),
+              ListTile(leading: const Icon(Icons.delete_outline, color: Colors.red),
+                  title: const Text('删除文件夹（笔记移回书架）', style: TextStyle(color: Colors.red)),
+                  onTap: () => Navigator.pop(sheet, 'delete')),
+            ])));
+    if (!context.mounted) return;
+    if (action == 'rename') {
+      final name = await _folderName(context);
+      if (!context.mounted) return;
+      if (name != null) await controller.renameFolder(summary.id, name);
+    } else if (action == 'delete' &&
+        await _confirm(context, '删除文件夹', '文件夹内笔记会移回书架，不会删除。')) {
+      await controller.deleteFolder(summary.id);
+    }
+    return;
+  }
   final action = await showModalBottomSheet<String>(
       context: context,
       builder: (_) => SafeArea(
@@ -206,6 +283,11 @@ Future<void> _documentMenu(
                 leading: Icon(summary.isLocked ? Icons.lock_open_outlined : Icons.lock_outline),
                 title: Text(summary.isLocked ? '取消加锁' : '加锁笔记'),
                 onTap: () => Navigator.pop(context, 'lock')),
+            if (!summary.isFolder)
+              ListTile(
+                  leading: const Icon(Icons.drive_file_move_outline),
+                  title: const Text('移动到文件夹'),
+                  onTap: () => Navigator.pop(context, 'folder')),
             ListTile(
                 leading: const Icon(Icons.image_outlined),
                 title: const Text('添加或更换封面'),
@@ -222,7 +304,17 @@ Future<void> _documentMenu(
                 onTap: () => Navigator.pop(context, 'delete')),
           ])));
   if (action == null) return;
-  await controller.switchDocument(summary.id);
+  if (summary.isLocked) {
+    if (!context.mounted) return;
+    final password = await _passwordDialog(context, title: '输入笔记密码');
+    if (!context.mounted ||
+        password == null ||
+        !await controller.switchDocument(summary.id, password: password)) {
+      return;
+    }
+  } else {
+    await controller.switchDocument(summary.id);
+  }
   if (!context.mounted) return;
   if (action == 'rename') {
     _rename(context, controller);
@@ -231,7 +323,18 @@ Future<void> _documentMenu(
   } else if (action == 'favorite') {
     await controller.setFavorite(!summary.isFavorite);
   } else if (action == 'lock') {
-    await controller.setLocked(!summary.isLocked);
+    if (summary.isLocked) {
+      await controller.clearLockPassword();
+    } else {
+      final password = await _passwordDialog(context, title: '设置笔记密码', confirmation: true);
+      if (password != null) await controller.setLockPassword(password);
+    }
+  } else if (action == 'folder') {
+    final folderId = await _chooseFolder(context, controller);
+    if (folderId != null) {
+      await controller.assignCurrentDocumentToFolder(
+          folderId == '_root' ? null : folderId);
+    }
   } else if (action == 'cover') {
     final selected = await ImagePicker().pickImage(source: ImageSource.gallery);
     if (selected != null) await controller.setCover(File(selected.path));
@@ -248,7 +351,60 @@ Future<void> _documentMenu(
   }
 }
 
-Future<void> _createMenu(BuildContext context, CanvasController controller) async {
+Future<String?> _chooseFolder(
+    BuildContext context, CanvasController controller) => showModalBottomSheet<String>(
+        context: context,
+        builder: (sheet) => SafeArea(
+            child: ListView(shrinkWrap: true, children: [
+              ListTile(
+                  leading: const Icon(Icons.home_outlined),
+                  title: const Text('书架根目录'),
+                  onTap: () => Navigator.pop(sheet, '_root')),
+              ...controller.summaries
+                  .where((item) => item.isFolder && !item.isDeleted)
+                  .map((folder) => ListTile(
+                      leading: const Icon(Icons.folder_outlined),
+                      title: Text(folder.title),
+                      onTap: () => Navigator.pop(sheet, folder.id)))
+            ])));
+
+Future<String?> _passwordDialog(BuildContext context,
+    {required String title, bool confirmation = false}) async {
+  final first = TextEditingController();
+  final second = TextEditingController();
+  final result = await showDialog<String>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+              title: Text(title),
+              content: Column(mainAxisSize: MainAxisSize.min, children: [
+                TextField(
+                    controller: first,
+                    obscureText: true,
+                    keyboardType: TextInputType.visiblePassword,
+                    decoration: const InputDecoration(labelText: '密码（至少 4 位）')),
+                if (confirmation)
+                  TextField(
+                      controller: second,
+                      obscureText: true,
+                      decoration: const InputDecoration(labelText: '确认密码')),
+              ]),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(dialog), child: const Text('取消')),
+                FilledButton(
+                    onPressed: () {
+                      if (first.text.trim().length < 4 ||
+                          (confirmation && first.text != second.text)) return;
+                      Navigator.pop(dialog, first.text.trim());
+                    },
+                    child: const Text('确定'))
+              ]));
+  first.dispose();
+  second.dispose();
+  return result;
+}
+
+Future<void> _createMenu(BuildContext context, CanvasController controller,
+    {String? folderId}) async {
   final action = await showModalBottomSheet<String>(
       context: context,
       builder: (sheet) => SafeArea(child: Wrap(children: [
@@ -271,21 +427,19 @@ Future<void> _createMenu(BuildContext context, CanvasController controller) asyn
           ])));
   if (action == null || !context.mounted) return;
   if (action == 'note') {
-    await controller.createDocument();
+    await controller.createDocument(folderId: folderId);
     if (context.mounted) _openEditor(context);
   } else if (action == 'folder') {
     final name = await _folderName(context);
     if (name != null && context.mounted) {
-      // 命名文件夹会作为书架入口保存，便于后续手动整理同类草稿。
-      await controller.createDocument(title: '📁 $name');
-      if (context.mounted) _openEditor(context);
+      await controller.createFolder(name);
     }
   } else if (action == 'image') {
     final image = await ImagePicker()
         .pickImage(source: ImageSource.gallery, imageQuality: 92);
     if (image == null) return;
     await controller.createDocument(
-        title: '图片 ${DateTime.now().toString().substring(0, 16)}');
+        title: '图片 ${DateTime.now().toString().substring(0, 16)}', folderId: folderId);
     await controller.insertImage(File(image.path), const Offset(-120, -90));
     if (context.mounted) _openEditor(context);
   } else if (action == 'pdf') {
@@ -294,7 +448,7 @@ Future<void> _createMenu(BuildContext context, CanvasController controller) asyn
     final file = picked?.files.singleOrNull;
     if (file == null) return;
     await controller.createDocument(title: file.name.replaceFirst(
-        RegExp(r'\.pdf$', caseSensitive: false), ''));
+        RegExp(r'\.pdf$', caseSensitive: false), ''), folderId: folderId);
     controller.insertText(
         'PDF 附件\n${file.name}\n${file.path ?? '已选择本机文件'}',
         const Offset(-120, -60));
@@ -331,12 +485,14 @@ class _ShelfNotebook extends StatelessWidget {
       required this.subtitle,
       required this.onTap,
       this.isCreate = false,
+      this.isFolder = false,
       this.coverPath,
       this.onMore});
   final Color color;
   final String title, subtitle;
   final VoidCallback onTap;
   final bool isCreate;
+  final bool isFolder;
   final String? coverPath;
   final VoidCallback? onMore;
 
@@ -381,24 +537,21 @@ class _ShelfNotebook extends StatelessWidget {
                                       color: Color(0xff64748b),
                                       shape: BoxShape.circle))))),
                   Center(
-                      child: Icon(isCreate ? Icons.add : Icons.draw_outlined,
+                      child: Icon(isCreate ? Icons.add : isFolder ? Icons.folder_copy_outlined : Icons.draw_outlined,
                           size: isCreate ? 48 : 34,
                           color: Theme.of(context)
                               .colorScheme
                               .onPrimaryContainer
                               .withValues(alpha: .72))),
-                  if (onMore != null)
-                    Positioned(
-                        top: 2,
-                        right: 1,
-                        child: IconButton(
-                            tooltip: '笔记操作',
-                            onPressed: onMore,
-                            icon: const Icon(Icons.more_horiz)))
                 ]))),
         const SizedBox(height: 8),
-        Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w700)),
+        Row(children: [
+          Expanded(child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700))),
+          if (onMore != null) SizedBox(width: 30, height: 30, child: IconButton(
+              padding: EdgeInsets.zero, tooltip: '笔记操作', onPressed: onMore,
+              icon: const Icon(Icons.more_horiz, size: 19)))
+        ]),
         Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodySmall)
       ]));

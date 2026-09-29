@@ -51,6 +51,14 @@ void main() {
     expect(restored.coverPath, '/cover.png');
   });
 
+  test('summary persists real folder and lock metadata', () {
+    final summary = DocumentSummary(
+        id: 'note', title: '数学', updatedAt: DateTime(2026),
+        folderId: 'folder-1', isFolder: false);
+    expect(DocumentSummary.fromJson(summary.toJson()).folderId, 'folder-1');
+    expect(DocumentSummary.fromJson(summary.toJson()).isFolder, isFalse);
+  });
+
   test('stroke hit test finds a nearby segment but not a distant point', () {
     final stroke = Stroke.pen(
       id: 's',

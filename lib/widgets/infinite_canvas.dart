@@ -6,6 +6,7 @@ import 'package:flutter/material.dart' hide Viewport;
 
 import '../controllers/canvas_controller.dart';
 import '../models/canvas_models.dart';
+import 'hsv_color_picker.dart';
 
 /// 世界坐标渲染：只绘制视口内对象，绝不创建无限大的 Bitmap。
 class InfiniteCanvas extends StatefulWidget {
@@ -51,10 +52,22 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
       c.cancelActiveStroke();
       return;
     }
-    if (c.hasTransformBox &&
-        (c.tool == CanvasTool.select || c.tool == CanvasTool.lasso) &&
-        _startTransform(e)) {
+    final point = world(e.localPosition);
+    if (c.tool == CanvasTool.lasso &&
+        c.selectionPresentation == SelectionPresentation.lassoPath &&
+        c.selectionPathContains(point)) {
+      setState(() => _showSelectionActions = true);
       return;
+    }
+    if (c.hasTransformBox &&
+        (c.tool == CanvasTool.select || c.tool == CanvasTool.lasso)) {
+      final hit = _selectionGeometry?.hitTest(e.localPosition);
+      // 移动后操作条暂时隐藏；轻点已选对象本身只负责重新显示，不会误触拖动。
+      if (hit == _TransformHandle.move && !_showSelectionActions) {
+        setState(() => _showSelectionActions = true);
+        return;
+      }
+      if (_startTransform(e)) return;
     }
     if (!_shouldDraw(e)) {
       if (c.tool == CanvasTool.select) {
@@ -154,6 +167,7 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
           c.endPartialErase();
         case CanvasTool.lasso:
           c.endLasso();
+          setState(() => _showSelectionActions = true);
         case CanvasTool.eraserStroke || CanvasTool.pan || CanvasTool.select:
           break;
       }
@@ -541,16 +555,10 @@ class _CanvasSelectionActions extends StatelessWidget {
                           TextButton.icon(
                               onPressed: controller.enableSelectionTransform,
                               icon: const Icon(Icons.open_in_full, size: 17),
-                              label: const Text('调整大小')),
-                        PopupMenuButton<int>(
+                              label: const Text('调整大小并移动')),
+                        IconButton(
                             tooltip: '修改选中颜色',
-                            onSelected: controller.colorSelection,
-                            itemBuilder: (_) => const [
-                              PopupMenuItem(value: 0xff111827, child: Text('黑色')),
-                              PopupMenuItem(value: 0xffdc2626, child: Text('红色')),
-                              PopupMenuItem(value: 0xff2563eb, child: Text('蓝色')),
-                              PopupMenuItem(value: 0xff16a34a, child: Text('绿色')),
-                            ],
+                            onPressed: () => _showSelectionColor(context, controller),
                             icon: const Icon(Icons.palette_outlined, size: 19)),
                         if (isText)
                           PopupMenuButton<String>(
@@ -602,6 +610,46 @@ class _CanvasSelectionActions extends StatelessWidget {
                        ])))))
     ]);
   }
+}
+
+Future<void> _showSelectionColor(
+    BuildContext context, CanvasController controller) async {
+  var selected = 0xff111827;
+  await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheet) => StatefulBuilder(
+          builder: (_, refresh) => SafeArea(
+                  child: Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 12, 18, 22),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        const Text('选中内容颜色'),
+                        const SizedBox(height: 8),
+                        Wrap(
+                            spacing: 10,
+                            children: const [
+                              0xff111827, 0xffdc2626, 0xffea580c, 0xff16a34a,
+                              0xff2563eb, 0xff7c3aed, 0xffec4899, 0xfffacc15
+                            ]
+                                .map((value) => InkWell(
+                                    onTap: () {
+                                      selected = value;
+                                      controller.colorSelection(value);
+                                      refresh(() {});
+                                    },
+                                    child: CircleAvatar(
+                                        radius: 14,
+                                        backgroundColor: Color(value))))
+                                .toList()),
+                        const SizedBox(height: 10),
+                        HsvColorPicker(
+                            colorValue: selected,
+                            onChanged: (value) {
+                              selected = value;
+                              controller.colorSelection(value);
+                              refresh(() {});
+                            })
+                      ])))));
 }
 
 class _SelectionOverlayPainter extends CustomPainter {

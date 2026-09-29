@@ -301,7 +301,9 @@ class DocumentSummary {
       this.isFavorite = false,
       this.isLocked = false,
       this.isDeleted = false,
-      this.coverPath});
+      this.coverPath,
+      this.folderId,
+      this.isFolder = false});
   final String id;
   final String title;
   final DateTime updatedAt;
@@ -309,6 +311,8 @@ class DocumentSummary {
   final bool isLocked;
   final bool isDeleted;
   final String? coverPath;
+  final String? folderId;
+  final bool isFolder;
   Map<String, dynamic> toJson() =>
       {
         'id': id,
@@ -318,6 +322,8 @@ class DocumentSummary {
         'locked': isLocked,
         'deleted': isDeleted,
         'coverPath': coverPath,
+        'folderId': folderId,
+        'isFolder': isFolder,
       };
   factory DocumentSummary.fromJson(Map<String, dynamic> j) => DocumentSummary(
       id: j['id'] as String,
@@ -326,7 +332,9 @@ class DocumentSummary {
       isFavorite: j['favorite'] as bool? ?? false,
       isLocked: j['locked'] as bool? ?? false,
       isDeleted: j['deleted'] as bool? ?? false,
-      coverPath: j['coverPath'] as String?);
+      coverPath: j['coverPath'] as String?,
+      folderId: j['folderId'] as String?,
+      isFolder: j['isFolder'] as bool? ?? false);
 }
 
 class DocumentModel {
@@ -343,7 +351,10 @@ class DocumentModel {
       this.isFavorite = false,
       this.isLocked = false,
       this.isDeleted = false,
-      this.coverPath})
+      this.coverPath,
+      this.folderId,
+      this.isFolder = false,
+      this.lockPassword})
       : strokes = List.unmodifiable(strokes),
         images = List.unmodifiable(images),
         texts = List.unmodifiable(texts);
@@ -360,6 +371,10 @@ class DocumentModel {
   final bool isLocked;
   final bool isDeleted;
   final String? coverPath;
+  final String? folderId;
+  final bool isFolder;
+  /// 个人离线应用的本机访问口令；后续可替换为系统安全存储。
+  final String? lockPassword;
   DocumentModel copyWith(
           {String? title,
           DateTime? updatedAt,
@@ -372,7 +387,12 @@ class DocumentModel {
           bool? isLocked,
           bool? isDeleted,
           String? coverPath,
-          bool clearCover = false}) =>
+          bool clearCover = false,
+          String? folderId,
+          bool clearFolder = false,
+          bool? isFolder,
+          String? lockPassword,
+          bool clearLock = false}) =>
       DocumentModel(
           id: id,
           title: title ?? this.title,
@@ -386,7 +406,10 @@ class DocumentModel {
           isFavorite: isFavorite ?? this.isFavorite,
           isLocked: isLocked ?? this.isLocked,
           isDeleted: isDeleted ?? this.isDeleted,
-          coverPath: clearCover ? null : coverPath ?? this.coverPath);
+          coverPath: clearCover ? null : coverPath ?? this.coverPath,
+          folderId: clearFolder ? null : folderId ?? this.folderId,
+          isFolder: isFolder ?? this.isFolder,
+          lockPassword: clearLock ? null : lockPassword ?? this.lockPassword);
   DocumentSummary get summary =>
       DocumentSummary(
           id: id,
@@ -395,7 +418,9 @@ class DocumentModel {
           isFavorite: isFavorite,
           isLocked: isLocked,
           isDeleted: isDeleted,
-          coverPath: coverPath);
+          coverPath: coverPath,
+          folderId: folderId,
+          isFolder: isFolder);
   Map<String, dynamic> toJson() => {
         'id': id,
         'title': title,
@@ -407,6 +432,9 @@ class DocumentModel {
         'locked': isLocked,
         'deleted': isDeleted,
         'coverPath': coverPath,
+        'folderId': folderId,
+        'isFolder': isFolder,
+        'lockPassword': lockPassword,
         'strokes': strokes.map((s) => s.toJson()).toList(),
         'images': images.map((i) => i.toJson()).toList(),
         'texts': texts.map((t) => t.toJson()).toList()
@@ -426,6 +454,9 @@ class DocumentModel {
       isLocked: j['locked'] as bool? ?? false,
       isDeleted: j['deleted'] as bool? ?? false,
       coverPath: j['coverPath'] as String?,
+      folderId: j['folderId'] as String?,
+      isFolder: j['isFolder'] as bool? ?? false,
+      lockPassword: j['lockPassword'] as String?,
       strokes: (j['strokes'] as List<dynamic>? ?? const [])
           .map((e) => Stroke.fromJson(e as Map<String, dynamic>))
           .toList(),

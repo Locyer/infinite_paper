@@ -80,6 +80,10 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   bool get hasTransformBox =>
       _selectionPresentation == SelectionPresentation.object ||
       _selectionPresentation == SelectionPresentation.transformBox;
+  bool selectionPathContains(Offset point) {
+    final path = _selectionPath;
+    return path != null && path.length > 2 && _inside(point, path);
+  }
   double get selectionRotation {
     if (_selection.length != 1) return 0;
     final id = _selection.single;
@@ -137,10 +141,11 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  Future<bool> switchDocument(String id) async {
+  Future<bool> switchDocument(String id, {String? password}) async {
     await flushSave();
     final loaded = await _repository.loadDocument(id);
     if (loaded == null) return false;
+    if (loaded.isLocked && loaded.lockPassword != password) return false;
     _document = loaded;
     _undoStack.clear();
     _redoStack.clear();
@@ -152,14 +157,15 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
     return true;
   }
 
-  Future<void> createDocument({String? title}) async {
+  Future<void> createDocument({String? title, String? folderId}) async {
     if (_ready) await flushSave();
     final now = DateTime.now();
     _document = DocumentModel(
         id: _uuid.v4(),
         title: title ?? '草稿 ${_summaries.length + 1}',
         createdAt: now,
-        updatedAt: now);
+        updatedAt: now,
+        folderId: folderId);
     _undoStack.clear();
     _redoStack.clear();
     _selection = {};
@@ -213,6 +219,75 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> setLocked(bool value) async {
     _document = _document.copyWith(isLocked: value, updatedAt: DateTime.now());
     await _saveNow();
+    notifyListeners();
+  }
+
+  Future<void> setLockPassword(String password) async {
+    if (password.trim().length < 4) return;
+    _document = _document.copyWith(
+        isLocked: true,
+        lockPassword: password.trim(),
+        updatedAt: DateTime.now());
+    await _saveNow();
+    notifyListeners();
+  }
+
+  Future<void> clearLockPassword() async {
+    _document = _document.copyWith(
+        isLocked: false, clearLock: true, updatedAt: DateTime.now());
+    await _saveNow();
+    notifyListeners();
+  }
+
+  /// 文件夹是独立的书架对象，不会切换当前正在编辑的笔记。
+  Future<String> createFolder(String title) async {
+    final name = title.trim();
+    if (name.isEmpty) throw ArgumentError.value(title, 'title', '文件夹名称不能为空');
+    final now = DateTime.now();
+    final folder = DocumentModel(
+        id: _uuid.v4(),
+        title: name,
+        createdAt: now,
+        updatedAt: now,
+        isFolder: true);
+    await _repository.saveDocument(folder);
+    _summaries = await _repository.loadIndex();
+    notifyListeners();
+    return folder.id;
+  }
+
+  Future<void> assignCurrentDocumentToFolder(String? folderId) async {
+    if (folderId != null && !_summaries.any((s) => s.id == folderId && s.isFolder)) {
+      throw ArgumentError.value(folderId, 'folderId', '目标文件夹不存在');
+    }
+    _document = _document.copyWith(
+        folderId: folderId,
+        clearFolder: folderId == null,
+        updatedAt: DateTime.now());
+    await _saveNow();
+    notifyListeners();
+  }
+
+  Future<void> renameFolder(String id, String title) async {
+    final folder = await _repository.loadDocument(id);
+    if (folder == null || !folder.isFolder || title.trim().isEmpty) return;
+    await _repository.saveDocument(
+        folder.copyWith(title: title.trim(), updatedAt: DateTime.now()));
+    _summaries = await _repository.loadIndex();
+    notifyListeners();
+  }
+
+  /// 删除文件夹时把其中笔记移回根目录，避免把内容一起误删。
+  Future<void> deleteFolder(String id) async {
+    for (final summary in _summaries.where((item) => item.folderId == id)) {
+      final document = await _repository.loadDocument(summary.id);
+      if (document != null) {
+        await _repository.saveDocument(
+            document.copyWith(clearFolder: true, updatedAt: DateTime.now()));
+      }
+    }
+    await _repository.deleteDocument(id);
+    _summaries = await _repository.loadIndex();
     notifyListeners();
   }
 
