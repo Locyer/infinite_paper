@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_paper/controllers/canvas_controller.dart';
 import 'package:infinite_paper/models/canvas_models.dart';
@@ -100,5 +102,63 @@ void main() {
     expect(controller.document.texts, hasLength(2));
     expect(controller.document.texts.last.rect.topLeft,
         const Offset(200, 300));
+  });
+
+  test('lasso retains one freeform selection path until resize is requested', () {
+    controller.addCompletedStroke(sampleStroke('lasso'));
+    controller.beginLasso(const Offset(-5, -5));
+    controller.appendLasso(const Offset(15, -5));
+    controller.appendLasso(const Offset(15, 5));
+    controller.appendLasso(const Offset(-5, 5));
+    controller.endLasso();
+
+    expect(controller.selectionPresentation, SelectionPresentation.lassoPath);
+    expect(controller.selectionPath, hasLength(4));
+    controller.enableSelectionTransform();
+    expect(controller.selectionPresentation, SelectionPresentation.transformBox);
+    expect(controller.selectionPath, isNotEmpty);
+  });
+
+  test('resizing a selected text changes its single outer rectangle', () {
+    controller.insertText('resize', const Offset(20, 30));
+    controller.selectAt(const Offset(30, 40));
+    controller.beginTransform();
+    controller.resizeSelectionTo(const Rect.fromLTWH(20, 30, 440, 160));
+    controller.endTransform();
+
+    expect(controller.document.texts.single.rect,
+        const Rect.fromLTWH(20, 30, 440, 160));
+    expect(controller.selectionBounds, const Rect.fromLTWH(20, 30, 440, 160));
+  });
+
+  test('single object rotation snaps to a cardinal angle', () {
+    controller.insertText('turn', const Offset(10, 20));
+    controller.selectAt(const Offset(20, 30));
+
+    controller.setSelectionRotation(1.60);
+
+    expect(controller.selectionRotation, closeTo(1.570796, .0001));
+  });
+
+  test('lasso selects only the enclosed part of a crossing stroke', () {
+    controller.addCompletedStroke(Stroke.pen(
+        id: 'crossing',
+        colorValue: 0xff000000,
+        width: 2,
+        points: const [
+          StrokePoint(x: 0, y: 0, pressure: 1, time: 0),
+          StrokePoint(x: 10, y: 0, pressure: 1, time: 1),
+          StrokePoint(x: 20, y: 0, pressure: 1, time: 2),
+          StrokePoint(x: 30, y: 0, pressure: 1, time: 3),
+        ]));
+    controller.beginLasso(const Offset(8, -5));
+    controller.appendLasso(const Offset(22, -5));
+    controller.appendLasso(const Offset(22, 5));
+    controller.appendLasso(const Offset(8, 5));
+    controller.endLasso();
+
+    expect(controller.selectionBounds?.left, 9);
+    expect(controller.selectionBounds?.right, 21);
+    expect(controller.visibleStrokes, hasLength(3));
   });
 }

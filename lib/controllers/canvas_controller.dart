@@ -30,6 +30,8 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   List<Stroke> _laserStrokes = [];
   List<_ClipboardObject> _clipboard = [];
   Set<String> _selection = {};
+  List<Offset>? _selectionPath;
+  SelectionPresentation _selectionPresentation = SelectionPresentation.none;
   DocumentModel? _selectionMoveBefore;
   bool _selectionMoved = false;
   CanvasTool _tool = CanvasTool.pen;
@@ -67,6 +69,24 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
   String? get saveError => _saveError;
   Set<String> get selection => Set.unmodifiable(_selection);
   bool get hasSelection => _selection.isNotEmpty;
+  SelectionPresentation get selectionPresentation => _selectionPresentation;
+  List<Offset>? get selectionPath => _selectionPath == null
+      ? null
+      : List.unmodifiable(_selectionPath!);
+  bool get hasTransformBox =>
+      _selectionPresentation == SelectionPresentation.object ||
+      _selectionPresentation == SelectionPresentation.transformBox;
+  double get selectionRotation {
+    if (_selection.length != 1) return 0;
+    final id = _selection.single;
+    for (final image in _document.images) {
+      if (id == 'i:${image.id}') return image.rotation;
+    }
+    for (final text in _document.texts) {
+      if (id == 't:${text.id}') return text.rotation;
+    }
+    return 0;
+  }
   bool get hasClipboard => _clipboard.isNotEmpty;
   List<Stroke> get visibleStrokes =>
       _document.strokes.where((s) => !s.isErased).toList(growable: false);
@@ -113,6 +133,8 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
     _undoStack.clear();
     _redoStack.clear();
     _selection = {};
+    _selectionPath = null;
+    _selectionPresentation = SelectionPresentation.none;
     _touchCompleted();
     notifyListeners();
     return true;
@@ -129,6 +151,8 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
     _undoStack.clear();
     _redoStack.clear();
     _selection = {};
+    _selectionPath = null;
+    _selectionPresentation = SelectionPresentation.none;
     await _saveNow();
     _touchCompleted();
     notifyListeners();
@@ -152,6 +176,8 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
     _undoStack.clear();
     _redoStack.clear();
     _selection = {};
+    _selectionPath = null;
+    _selectionPresentation = SelectionPresentation.none;
     await _saveNow();
     _touchCompleted();
     notifyListeners();
@@ -179,6 +205,8 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
     // 套索和选择工具共享同一份选择结果；切回书写工具才结束选择。
     if (!{CanvasTool.lasso, CanvasTool.select}.contains(value)) {
       _selection = {};
+      _selectionPath = null;
+      _selectionPresentation = SelectionPresentation.none;
     }
     notifyListeners();
   }
@@ -383,9 +411,19 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
     final selected = <String>{};
-    for (final s in visibleStrokes) {
-      if (s.points.any((p) => _inside(p.offset, polygon)))
-        selected.add('s:${s.id}');
+    var strokeWasSplit = false;
+    final nextStrokes = <Stroke>[];
+    for (final stroke in _document.strokes) {
+      if (stroke.isErased) {
+        nextStrokes.add(stroke);
+        continue;
+      }
+      final parts = _splitStrokeForLasso(stroke, polygon);
+      strokeWasSplit = strokeWasSplit || parts.length > 1;
+      for (final part in parts) {
+        nextStrokes.add(part.stroke);
+        if (part.inside) selected.add('s:${part.stroke.id}');
+      }
     }
     for (final i in _document.images) {
       if (_inside(i.rect.center, polygon) ||
@@ -397,9 +435,37 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
           t.rect.corners.any((p) => _inside(p, polygon)))
         selected.add('t:${t.id}');
     }
+    if (strokeWasSplit) {
+      _mutate((document) => document.copyWith(strokes: nextStrokes));
+    }
     _selection = selected;
+    _selectionPath = List.of(polygon);
+    _selectionPresentation = selected.isEmpty
+        ? SelectionPresentation.none
+        : SelectionPresentation.lassoPath;
     _touchActive();
     notifyListeners();
+  }
+
+  List<_LassoStrokePart> _splitStrokeForLasso(
+      Stroke stroke, List<Offset> polygon) {
+    if (stroke.points.isEmpty) return [_LassoStrokePart(stroke, false)];
+    final runs = <({bool inside, List<StrokePoint> points})>[];
+    for (final point in stroke.points) {
+      final inside = _inside(point.offset, polygon);
+      if (runs.isEmpty || runs.last.inside != inside) {
+        runs.add((inside: inside, points: [point]));
+      } else {
+        runs.last.points.add(point);
+      }
+    }
+    if (runs.length == 1) {
+      return [_LassoStrokePart(stroke, runs.single.inside)];
+    }
+    return runs
+        .map((run) => _LassoStrokePart(
+            stroke.copyWith(id: _uuid.v4(), points: run.points), run.inside))
+        .toList();
   }
 
   bool _inside(Offset p, List<Offset> poly) {
@@ -415,6 +481,8 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
 
   void clearSelection() {
     _selection = {};
+    _selectionPath = null;
+    _selectionPresentation = SelectionPresentation.none;
     _touchCompleted();
     notifyListeners();
   }
@@ -445,6 +513,10 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
       }
     }
     _selection = selected == null ? {} : {selected};
+    _selectionPath = null;
+    _selectionPresentation = selected == null
+        ? SelectionPresentation.none
+        : SelectionPresentation.object;
     _touchCompleted();
     notifyListeners();
     return selected != null;
@@ -482,6 +554,19 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
                 ? t.copyWith(rect: t.rect.shift(delta))
                 : t)
             .toList());
+    _applySelectionChange(transform);
+  }
+
+  void endMoveSelection() {
+    final before = _selectionMoveBefore;
+    _selectionMoveBefore = null;
+    if (before == null || !_selectionMoved) return;
+    _record(before: before, after: _document);
+    _afterMutation();
+  }
+
+  void _applySelectionChange(
+      DocumentModel Function(DocumentModel) transform) {
     if (_selectionMoveBefore == null) {
       _mutate(transform);
       return;
@@ -492,12 +577,91 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  void endMoveSelection() {
-    final before = _selectionMoveBefore;
-    _selectionMoveBefore = null;
-    if (before == null || !_selectionMoved) return;
-    _record(before: before, after: _document);
-    _afterMutation();
+  /// 将自由套索命中的内容切换成整体变换框；不改写原始套索路径。
+  void enableSelectionTransform() {
+    if (_selection.isEmpty) return;
+    _selectionPresentation = SelectionPresentation.transformBox;
+    _touchCompleted();
+    notifyListeners();
+  }
+
+  void beginTransform() => beginMoveSelection();
+
+  void endTransform() => endMoveSelection();
+
+  /// 把选择内容映射到新外接矩形，用于八个缩放控制柄。
+  void resizeSelectionTo(Rect target) {
+    final source = selectionBounds;
+    if (_selection.isEmpty ||
+        source == null ||
+        target.width < 8 ||
+        target.height < 8 ||
+        source.width == 0 ||
+        source.height == 0) return;
+    Offset mapPoint(Offset point) => Offset(
+        target.left + (point.dx - source.left) / source.width * target.width,
+        target.top + (point.dy - source.top) / source.height * target.height);
+    Rect mapRect(Rect rect) =>
+        Rect.fromPoints(mapPoint(rect.topLeft), mapPoint(rect.bottomRight));
+    final widthFactor = math.sqrt(
+        (target.width / source.width) * (target.height / source.height));
+    _applySelectionChange((d) => d.copyWith(
+        strokes: d.strokes
+            .map((s) => _selection.contains('s:${s.id}')
+                ? s.copyWith(
+                    points: s.points
+                        .map((p) => StrokePoint(
+                            x: mapPoint(p.offset).dx,
+                            y: mapPoint(p.offset).dy,
+                            pressure: p.pressure,
+                            time: p.time))
+                        .toList(),
+                    width: s.width * widthFactor)
+                : s)
+            .toList(),
+        images: d.images
+            .map((i) => _selection.contains('i:${i.id}')
+                ? i.copyWith(rect: mapRect(i.rect))
+                : i)
+            .toList(),
+        texts: d.texts
+            .map((t) => _selection.contains('t:${t.id}')
+                ? t.copyWith(
+                    rect: mapRect(t.rect), fontSize: t.fontSize * widthFactor)
+                : t)
+            .toList()));
+  }
+
+  /// 单个图片或文本按目标角度旋转，靠近直角时自动吸附。
+  void setSelectionRotation(double radians) {
+    if (_selection.length != 1) return;
+    final target = _snapAngle(radians);
+    _applySelectionChange((d) => d.copyWith(
+        images: d.images
+            .map((i) => _selection.contains('i:${i.id}')
+                ? i.copyWith(rotation: target)
+                : i)
+            .toList(),
+        texts: d.texts
+            .map((t) => _selection.contains('t:${t.id}')
+                ? t.copyWith(rotation: target)
+                : t)
+            .toList()));
+  }
+
+  double _snapAngle(double angle) {
+    final turn = math.pi * 2;
+    var normalized = angle % turn;
+    if (normalized < 0) normalized += turn;
+    const threshold = math.pi / 45; // 4 度。
+    for (var step = 0; step < 4; step++) {
+      final cardinal = step * math.pi / 2;
+      final distance = (normalized - cardinal).abs();
+      if (distance < threshold || turn - distance < threshold) {
+        return cardinal == turn ? 0 : cardinal;
+      }
+    }
+    return normalized;
   }
 
   void deleteSelection() {
@@ -511,6 +675,8 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
         images: d.images.where((i) => !ids.contains('i:${i.id}')).toList(),
         texts: d.texts.where((t) => !ids.contains('t:${t.id}')).toList()));
     _selection = {};
+    _selectionPath = null;
+    _selectionPresentation = SelectionPresentation.none;
   }
 
   void copySelection({bool cut = false}) {
@@ -559,6 +725,8 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
       ...addI.map((x) => 'i:${x.id}'),
       ...addT.map((x) => 't:${x.id}')
     };
+    _selectionPath = null;
+    _selectionPresentation = SelectionPresentation.transformBox;
   }
 
   List<_ClipboardObject> _selectedObjects() => [
@@ -695,6 +863,8 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
         rect: Rect.fromLTWH(world.dx, world.dy, 240, 180));
     _mutate((d) => d.copyWith(images: [...d.images, image]));
     _selection = {'i:${image.id}'};
+    _selectionPath = null;
+    _selectionPresentation = SelectionPresentation.object;
     _tool = CanvasTool.select;
     notifyListeners();
   }
@@ -709,6 +879,8 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
         fontSize: 18);
     _mutate((d) => d.copyWith(texts: [...d.texts, item]));
     _selection = {'t:${item.id}'};
+    _selectionPath = null;
+    _selectionPresentation = SelectionPresentation.object;
     _tool = CanvasTool.select;
     notifyListeners();
   }
@@ -830,6 +1002,12 @@ class CanvasController extends ChangeNotifier with WidgetsBindingObserver {
 class _Snapshot {
   const _Snapshot(this.document);
   final DocumentModel document;
+}
+
+class _LassoStrokePart {
+  const _LassoStrokePart(this.stroke, this.inside);
+  final Stroke stroke;
+  final bool inside;
 }
 
 sealed class _ClipboardObject {

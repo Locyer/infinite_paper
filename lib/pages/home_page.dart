@@ -246,15 +246,6 @@ class EditorPage extends StatelessWidget {
             Expanded(
                 child: Stack(children: [
               InfiniteCanvas(controller: c),
-              if (c.hasSelection)
-                Positioned(
-                    top: 10,
-                    left: 10,
-                    right: 10,
-                    child: _SelectionBar(
-                        controller: c,
-                        onColor: () =>
-                            _toolOptions(context, c, CanvasTool.pen))),
             ])),
             BottomToolbar(
                 controller: c,
@@ -266,60 +257,6 @@ class EditorPage extends StatelessWidget {
           ]),
         ),
       );
-}
-
-class _SelectionBar extends StatelessWidget {
-  const _SelectionBar({required this.controller, required this.onColor});
-  final CanvasController controller;
-  final VoidCallback onColor;
-  @override
-  Widget build(BuildContext context) => Material(
-      elevation: 3,
-      borderRadius: BorderRadius.circular(12),
-      child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(children: [
-            IconButton(
-                tooltip: '删除',
-                onPressed: controller.deleteSelection,
-                icon: const Icon(Icons.delete_outline)),
-            IconButton(
-                tooltip: '复制',
-                onPressed: controller.copySelection,
-                icon: const Icon(Icons.copy_outlined)),
-            IconButton(
-                tooltip: '剪切',
-                onPressed: () => controller.copySelection(cut: true),
-                icon: const Icon(Icons.content_cut)),
-            IconButton(
-                tooltip: '粘贴',
-                onPressed: controller.pasteSelection,
-                icon: const Icon(Icons.content_paste)),
-            IconButton(
-                tooltip: '缩小',
-                onPressed: () => controller.scaleSelection(.8),
-                icon: const Icon(Icons.zoom_out)),
-            IconButton(
-                tooltip: '放大',
-                onPressed: () => controller.scaleSelection(1.25),
-                icon: const Icon(Icons.zoom_in)),
-            IconButton(
-                tooltip: '左转 15°',
-                onPressed: () => controller.rotateSelection(-.261799),
-                icon: const Icon(Icons.rotate_left)),
-            IconButton(
-                tooltip: '右转 15°',
-                onPressed: () => controller.rotateSelection(.261799),
-                icon: const Icon(Icons.rotate_right)),
-            IconButton(
-                tooltip: '颜色',
-                onPressed: onColor,
-                icon: const Icon(Icons.palette_outlined)),
-            IconButton(
-                tooltip: '取消选择',
-                onPressed: controller.clearSelection,
-                icon: const Icon(Icons.close)),
-          ])));
 }
 
 const _quickColors = [

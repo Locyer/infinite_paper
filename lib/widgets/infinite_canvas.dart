@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart' hide Viewport;
@@ -23,6 +24,10 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
   int? _selectionPointer;
   Offset? _lastPan;
   Offset? _lastSelectionWorld;
+  _TransformHandle? _transformHandle;
+  Rect? _transformStartBounds;
+  Offset? _transformStartWorld;
+  double _transformStartRotation = 0;
   Offset? _eraserCursor;
   CanvasController get c => widget.controller;
   Offset world(Offset p) => c.document.viewport.screenToWorld(p);
@@ -43,6 +48,11 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
     if (_pointers.length > 1) {
       _transforming = true;
       c.cancelActiveStroke();
+      return;
+    }
+    if (c.hasTransformBox &&
+        (c.tool == CanvasTool.select || c.tool == CanvasTool.lasso) &&
+        _startTransform(e)) {
       return;
     }
     if (!_shouldDraw(e)) {
@@ -96,7 +106,7 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
       final old = _lastSelectionWorld;
       final current = world(e.localPosition);
       _lastSelectionWorld = current;
-      if (old != null) c.moveSelection(current - old);
+      _updateTransform(current, old);
       return;
     }
     final p = world(e.localPosition);
@@ -129,7 +139,10 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
     if (_selectionPointer == e.pointer) {
       _selectionPointer = null;
       _lastSelectionWorld = null;
-      c.endMoveSelection();
+      _transformHandle = null;
+      _transformStartBounds = null;
+      _transformStartWorld = null;
+      c.endTransform();
     }
     if (single) {
       switch (c.tool) {
@@ -178,6 +191,95 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
     } catch (_) {}
   }
 
+  _SelectionGeometry? get _selectionGeometry {
+    final bounds = c.selectionBounds;
+    if (bounds == null || !c.hasTransformBox) return null;
+    final viewport = c.document.viewport;
+    return _SelectionGeometry(
+        rect: Rect.fromPoints(
+            viewport.offset + bounds.topLeft * viewport.scale,
+            viewport.offset + bounds.bottomRight * viewport.scale),
+        rotation: c.selectionRotation);
+  }
+
+  bool _startTransform(PointerDownEvent event) {
+    final geometry = _selectionGeometry;
+    if (geometry == null) return false;
+    final handle = geometry.hitTest(event.localPosition);
+    if (handle == null) return false;
+    _selectionPointer = event.pointer;
+    _transformHandle = handle;
+    _transformStartBounds = c.selectionBounds;
+    _transformStartWorld = world(event.localPosition);
+    _transformStartRotation = c.selectionRotation;
+    _lastSelectionWorld = _transformStartWorld;
+    c.beginTransform();
+    return true;
+  }
+
+  void _updateTransform(Offset current, Offset? previous) {
+    final handle = _transformHandle;
+    final source = _transformStartBounds;
+    final start = _transformStartWorld;
+    if (handle == null || source == null || start == null) return;
+    if (handle == _TransformHandle.move) {
+      if (previous != null) c.moveSelection(current - previous);
+      return;
+    }
+    if (handle == _TransformHandle.rotate) {
+      final center = source.center;
+      final startAngle = math.atan2(start.dy - center.dy, start.dx - center.dx);
+      final currentAngle = math.atan2(current.dy - center.dy, current.dx - center.dx);
+      c.setSelectionRotation(
+          _transformStartRotation + currentAngle - startAngle);
+      return;
+    }
+    var left = source.left;
+    var top = source.top;
+    var right = source.right;
+    var bottom = source.bottom;
+    switch (handle) {
+      case _TransformHandle.topLeft:
+        left = current.dx;
+        top = current.dy;
+      case _TransformHandle.top:
+        top = current.dy;
+      case _TransformHandle.topRight:
+        right = current.dx;
+        top = current.dy;
+      case _TransformHandle.bottomRight:
+        right = current.dx;
+        bottom = current.dy;
+      case _TransformHandle.bottom:
+        bottom = current.dy;
+      case _TransformHandle.bottomLeft:
+        left = current.dx;
+        bottom = current.dy;
+      case _TransformHandle.left:
+        left = current.dx;
+      case _TransformHandle.move || _TransformHandle.rotate:
+        break;
+    }
+    const minimum = 8.0;
+    if (right - left < minimum) {
+      if ({_TransformHandle.topLeft, _TransformHandle.bottomLeft, _TransformHandle.left}
+          .contains(handle)) {
+        left = right - minimum;
+      } else {
+        right = left + minimum;
+      }
+    }
+    if (bottom - top < minimum) {
+      if ({_TransformHandle.topLeft, _TransformHandle.top, _TransformHandle.topRight}
+          .contains(handle)) {
+        top = bottom - minimum;
+      } else {
+        bottom = top + minimum;
+      }
+    }
+    c.resizeSelectionTo(Rect.fromLTRB(left, top, right, bottom));
+  }
+
   @override
   Widget build(BuildContext context) {
     _loadImages();
@@ -193,7 +295,10 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
         if (_selectionPointer == e.pointer) {
           _selectionPointer = null;
           _lastSelectionWorld = null;
-          c.endMoveSelection();
+          _transformHandle = null;
+          _transformStartBounds = null;
+          _transformStartWorld = null;
+          c.endTransform();
         }
         if (_pointers.isEmpty) _transforming = false;
         if (_pointers.isEmpty) setState(() => _eraserCursor = null);
@@ -234,6 +339,8 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
                           images: _images,
                           dark: dark,
                           selection: c.selection,
+                          selectionPath: c.selectionPath,
+                          selectionPresentation: c.selectionPresentation,
                           laser: c.laserStrokes)))),
           RepaintBoundary(
               child: ValueListenableBuilder<int>(
@@ -243,6 +350,14 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
                           stroke: c.activeStroke,
                           lasso: c.lassoPoints,
                           viewport: c.document.viewport)))),
+          if (c.hasSelection)
+            Positioned.fill(
+                child: _CanvasSelectionActions(
+                    key: const Key('selection-transform-overlay'),
+                    controller: c,
+                    geometry: _selectionGeometry ??
+                        _SelectionGeometry.fromBounds(
+                            c.selectionBounds!, c.document.viewport))),
           if (_eraserCursor != null)
             Positioned(
               left: _eraserCursor!.dx - _eraserDiameter / 2,
@@ -302,6 +417,184 @@ class _InfiniteCanvasState extends State<InfiniteCanvas> {
   }
 }
 
+enum _TransformHandle {
+  move,
+  topLeft,
+  top,
+  topRight,
+  rotate,
+  bottomRight,
+  bottom,
+  bottomLeft,
+  left
+}
+
+class _SelectionGeometry {
+  const _SelectionGeometry({required this.rect, required this.rotation});
+  final Rect rect;
+  final double rotation;
+  factory _SelectionGeometry.fromBounds(Rect bounds, Viewport viewport) =>
+      _SelectionGeometry(
+          rect: Rect.fromPoints(viewport.offset + bounds.topLeft * viewport.scale,
+              viewport.offset + bounds.bottomRight * viewport.scale),
+          rotation: 0);
+
+  Offset _rotate(Offset point) {
+    final v = point - rect.center;
+    final cos = math.cos(rotation), sin = math.sin(rotation);
+    return rect.center + Offset(v.dx * cos - v.dy * sin, v.dx * sin + v.dy * cos);
+  }
+
+  Offset pointFor(_TransformHandle handle) => _rotate(switch (handle) {
+        _TransformHandle.topLeft => rect.topLeft,
+        _TransformHandle.top => rect.topCenter,
+        _TransformHandle.topRight => rect.topRight,
+        _TransformHandle.rotate => rect.centerRight + const Offset(34, 0),
+        _TransformHandle.bottomRight => rect.bottomRight,
+        _TransformHandle.bottom => rect.bottomCenter,
+        _TransformHandle.bottomLeft => rect.bottomLeft,
+        _TransformHandle.left => rect.centerLeft,
+        _TransformHandle.move => rect.center,
+      });
+
+  _TransformHandle? hitTest(Offset screenPoint) {
+    for (final handle in _TransformHandle.values.where((h) => h != _TransformHandle.move)) {
+      if ((screenPoint - pointFor(handle)).distance <= 22) return handle;
+    }
+    final local = _rotateBack(screenPoint);
+    return rect.inflate(8).contains(local) ? _TransformHandle.move : null;
+  }
+
+  Offset _rotateBack(Offset point) {
+    final v = point - rect.center;
+    final cos = math.cos(-rotation), sin = math.sin(-rotation);
+    return rect.center + Offset(v.dx * cos - v.dy * sin, v.dx * sin + v.dy * cos);
+  }
+}
+
+class _CanvasSelectionActions extends StatelessWidget {
+  const _CanvasSelectionActions(
+      {super.key, required this.controller, required this.geometry});
+  final CanvasController controller;
+  final _SelectionGeometry geometry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isImage = controller.selection.any((id) => id.startsWith('i:'));
+    final showBox = controller.hasTransformBox;
+    final bubbleTop = geometry.rect.top > 64
+        ? geometry.rect.top - 54
+        : geometry.rect.bottom + 12;
+    return Stack(children: [
+      IgnorePointer(
+          child: CustomPaint(
+              painter: _SelectionOverlayPainter(
+                  geometry: geometry,
+                  showBox: showBox,
+                  angle: controller.selectionRotation))),
+      Positioned(
+          top: bubbleTop,
+          left: math.max(8, geometry.rect.left),
+          child: Material(
+              color: theme.colorScheme.surface.withValues(alpha: .96),
+              elevation: 5,
+              borderRadius: BorderRadius.circular(22),
+              child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 340),
+                  child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        if (controller.selectionPresentation ==
+                            SelectionPresentation.lassoPath)
+                          TextButton.icon(
+                              onPressed: controller.enableSelectionTransform,
+                              icon: const Icon(Icons.open_in_full, size: 17),
+                              label: const Text('调整大小')),
+                        if (isImage)
+                          PopupMenuButton<String>(
+                              tooltip: '裁剪',
+                              onSelected: (value) => ScaffoldMessenger.of(context)
+                                  .showSnackBar(SnackBar(
+                                      content: Text('$value 模式将在下一步选择裁剪区域'))),
+                              itemBuilder: (_) => const [
+                                PopupMenuItem(value: '矩形裁剪', child: Text('矩形裁剪')),
+                                PopupMenuItem(value: '自由裁剪', child: Text('自由裁剪')),
+                              ],
+                              icon: const Icon(Icons.crop_outlined, size: 19)),
+                        IconButton(
+                            tooltip: '复制',
+                            onPressed: controller.copySelection,
+                            icon: const Icon(Icons.copy_outlined, size: 19)),
+                        IconButton(
+                            tooltip: '剪切',
+                            onPressed: () => controller.copySelection(cut: true),
+                            icon: const Icon(Icons.content_cut, size: 19)),
+                        IconButton(
+                            tooltip: '删除',
+                            onPressed: controller.deleteSelection,
+                            icon: const Icon(Icons.delete_outline, size: 19)),
+                       ])))))
+    ]);
+  }
+}
+
+class _SelectionOverlayPainter extends CustomPainter {
+  const _SelectionOverlayPainter(
+      {required this.geometry, required this.showBox, required this.angle});
+  final _SelectionGeometry geometry;
+  final bool showBox;
+  final double angle;
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (!showBox) return;
+    final line = Paint()
+      ..color = const Color(0xff2563eb)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    canvas.save();
+    canvas.translate(geometry.rect.center.dx, geometry.rect.center.dy);
+    canvas.rotate(geometry.rotation);
+    canvas.drawRect(geometry.rect.shift(-geometry.rect.center), line);
+    canvas.restore();
+    for (final handle in _TransformHandle.values.where((h) => h != _TransformHandle.move)) {
+      final point = geometry.pointFor(handle);
+      final fill = Paint()
+        ..color = handle == _TransformHandle.rotate
+            ? const Color(0xff2563eb)
+            : Colors.white;
+      canvas.drawCircle(point, handle == _TransformHandle.rotate ? 10 : 7, fill);
+      canvas.drawCircle(point, handle == _TransformHandle.rotate ? 10 : 7, line);
+      if (handle == _TransformHandle.rotate) {
+        final text = TextPainter(
+            text: const TextSpan(text: '↻', style: TextStyle(color: Colors.white, fontSize: 13)),
+            textDirection: TextDirection.ltr)
+          ..layout();
+        text.paint(canvas, point - Offset(text.width / 2, text.height / 2));
+      }
+    }
+    final degrees = (angle * 180 / math.pi).round() % 360;
+    final label = TextPainter(
+        text: TextSpan(
+            text: '$degrees°',
+            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+        textDirection: TextDirection.ltr)
+      ..layout();
+    final labelRect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(geometry.rect.center.dx - label.width / 2 - 6,
+            geometry.rect.top - 28, label.width + 12, 22),
+        const Radius.circular(11));
+    canvas.drawRRect(labelRect, Paint()..color = const Color(0xff1d4ed8));
+    label.paint(canvas, labelRect.center - Offset(label.width / 2, label.height / 2));
+  }
+  @override
+  bool shouldRepaint(covariant _SelectionOverlayPainter old) =>
+      old.geometry.rect != geometry.rect ||
+      old.geometry.rotation != geometry.rotation ||
+      old.showBox != showBox ||
+      old.angle != angle;
+}
+
 class _CompletedPainter extends CustomPainter {
   _CompletedPainter(
       {required this.document,
@@ -309,12 +602,16 @@ class _CompletedPainter extends CustomPainter {
       required this.images,
       required this.dark,
       required this.selection,
+      required this.selectionPath,
+      required this.selectionPresentation,
       required this.laser});
   final DocumentModel document;
   final Viewport viewport;
   final Map<String, ui.Image> images;
   final bool dark;
   final Set<String> selection;
+  final List<Offset>? selectionPath;
+  final SelectionPresentation selectionPresentation;
   final List<Stroke> laser;
   @override
   void paint(Canvas canvas, Size size) {
@@ -347,13 +644,11 @@ class _CompletedPainter extends CustomPainter {
               Paint());
           canvas.restore();
         }
-        _select(canvas, i.rect, selection.contains('i:${i.id}'));
       }
     }
     for (final t in document.texts) {
       if (t.rect.overlaps(visible)) {
         _text(canvas, t);
-        _select(canvas, t.rect, selection.contains('t:${t.id}'));
       }
     }
     // 图片和文本是底图；墨迹始终在它们上面，便于批注。
@@ -365,9 +660,20 @@ class _CompletedPainter extends CustomPainter {
     for (final s in laser) {
       _stroke(canvas, s, laser: true);
     }
-    for (final s
-        in document.strokes.where((s) => selection.contains('s:${s.id}'))) {
-      _select(canvas, s.bounds.inflate(s.width / 2), true);
+    if (selectionPresentation == SelectionPresentation.lassoPath &&
+        selectionPath != null && selectionPath!.length > 2) {
+      final path = Path()..moveTo(selectionPath!.first.dx, selectionPath!.first.dy);
+      for (final point in selectionPath!.skip(1)) {
+        path.lineTo(point.dx, point.dy);
+      }
+      path.close();
+      canvas.drawPath(path, Paint()..color = const Color(0x222563eb));
+      canvas.drawPath(
+          _dashed(path, 8 / viewport.scale, 5 / viewport.scale),
+          Paint()
+            ..color = const Color(0xff2563eb)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2 / viewport.scale);
     }
     canvas.restore();
   }
@@ -385,22 +691,6 @@ class _CompletedPainter extends CustomPainter {
       canvas.drawLine(Offset(x, v.top), Offset(x, v.bottom), p);
     for (var y = sy; y <= v.bottom; y += step)
       canvas.drawLine(Offset(v.left, y), Offset(v.right, y), p);
-  }
-
-  void _select(Canvas c, Rect r, bool selected) {
-    if (!selected) return;
-    final p = Paint()
-      ..color = const Color(0xff2563eb)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5 / viewport.scale;
-    final box = r.inflate(3 / viewport.scale);
-    c.drawRect(box, p);
-    final handle = 7 / viewport.scale;
-    final handlePaint = Paint()..color = const Color(0xffeff6ff);
-    for (final point in [box.topLeft, box.topRight, box.bottomLeft, box.bottomRight]) {
-      c.drawCircle(point, handle, handlePaint);
-      c.drawCircle(point, handle, p);
-    }
   }
 
   @override

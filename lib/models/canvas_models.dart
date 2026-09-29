@@ -19,6 +19,9 @@ enum AppThemeMode { system, light, dark }
 
 enum CanvasInputMode { penAndTouch, stylusOnly, fingerPan }
 
+/// 选择内容的展示形式。自由套索不会自动变成矩形控制框。
+enum SelectionPresentation { none, object, lassoPath, transformBox }
+
 class StrokePoint {
   const StrokePoint(
       {required this.x,
